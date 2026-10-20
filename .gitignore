@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+
+# Downloaded dump and derived data (regenerate with data/download.py + data/build_qa.py)
+data/raw/
+data/processed/
+data/qdrant_storage/
+eval/runs/
+.vscode/

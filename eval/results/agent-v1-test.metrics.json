@@ -1,0 +1,120 @@
+{
+  "run_id": "agent-v1-test",
+  "config": {
+    "system": "agent_v1_minimal",
+    "generator": "gpt-5.4-mini",
+    "embed": "text-embedding-3-small",
+    "docs_k": 5,
+    "history_k": 3,
+    "max_tool_calls": 4,
+    "tool_retries": 2,
+    "max_steps": 12,
+    "prompts": {
+      "classify": "You triage Linux/Unix support tickets. Classify the ticket.\n- issue_type: the main area of the problem.\n- risk_level: how much damage a wrong fix could do on the asker's system.\n- missing_info: only facts without which no reasonable answer is possible. Most tickets are answerable as written; leave it empty unless something essential is truly absent.",
+      "retrieve": "You plan research for a Linux/Unix support ticket. You can search:\n- search_docs: man pages and GNU manuals (exact command/option/config behaviour)\n- search_similar: past solved Stack Exchange questions\nCall the searches that would help answer the ticket correctly, with focused queries. You may call several, or none if the answer is basic and certain without looking anything up.",
+      "draft": "You are a Linux/Unix support engineer answering a user's ticket.\nYou may be given context passages: documentation excerpts (D1, D2, ...) and past solved questions with their accepted answers (H1, H2, ...).\n- Passages were retrieved automatically and may be irrelevant. Use only those that actually address the ticket, and cite the IDs you relied on. Ignore the rest.\n- If no passage helps, answer from your own knowledge with empty citations.\n- Prefer precise, minimal commands. Never invent commands or options.\n- List every shell command you propose in `commands`, exactly as it should be run.\n- Set confidence honestly."
+    },
+    "split": "test",
+    "workers": 4
+  },
+  "tickets_in_split": 160,
+  "tickets_answered": 160,
+  "generation_errors": 0,
+  "tickets_judged": 160,
+  "accuracy": 0.3625,
+  "accuracy_ci95": [
+    0.2920431858352033,
+    0.43940474924355566
+  ],
+  "mean_score": 3.23125,
+  "score_hist": {
+    "1": 1,
+    "2": 40,
+    "3": 61,
+    "4": 37,
+    "5": 21
+  },
+  "faithfulness": {
+    "partially_supported": 140,
+    "no_citations": 9,
+    "supported": 7,
+    "unsupported": 4
+  },
+  "selective": {
+    "coverage": 1.0,
+    "accuracy_on_answered": 0.3625,
+    "accuracy_on_answered_ci95": [
+      0.2920431858352033,
+      0.43940474924355566
+    ],
+    "wrong_answers_shown": 102,
+    "correct_answers_escalated": 0
+  },
+  "commands": {
+    "answers_with_commands": 84,
+    "commands_total": 202,
+    "syntax_error_rate": 0.0,
+    "unknown_command_rate": 0.01485148514851485,
+    "answers_with_invalid_command_rate": 0.023809523809523808,
+    "unknown_names_top": [
+      [
+        "*}",
+        1
+      ],
+      [
+        "nixos-option",
+        1
+      ],
+      [
+        "nixos-version",
+        1
+      ]
+    ]
+  },
+  "citations": {
+    "answers_with_citations_rate": 0.94375,
+    "dangling_citation_rate": 0.0,
+    "cited_sources": {
+      "H": 118,
+      "D": 340
+    }
+  },
+  "latency_s": {
+    "total": {
+      "mean": 6.0497876453438035,
+      "p50": 4.8173618544997225,
+      "p95": 6.068360625000423,
+      "max": 185.48202134199892
+    },
+    "stage_p50": {
+      "classify": 0.9672492865001914,
+      "draft": 2.272722720999809,
+      "finalize": 0.0,
+      "retrieve": 1.589322484499462
+    }
+  },
+  "tokens_per_ticket": {
+    "input": 6666.6,
+    "output": 507.275
+  },
+  "llm_calls_per_ticket": {
+    "mean": 3,
+    "p50": 3.0,
+    "p95": 3,
+    "max": 3
+  },
+  "cost_usd": {
+    "per_ticket": {
+      "mean": 0.00728375775,
+      "p50": 0.0071973,
+      "p95": 0.0111378,
+      "max": 0.01459974
+    },
+    "per_correct": 0.02009312482758621,
+    "generation_total": 1.16540124,
+    "judge_total": 1.383524
+  },
+  "spot_check": {
+    "human_correct": null
+  }
+}

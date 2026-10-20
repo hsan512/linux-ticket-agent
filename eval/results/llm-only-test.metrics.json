@@ -1,0 +1,120 @@
+{
+  "run_id": "llm-only-test",
+  "config": {
+    "system": "llm_only",
+    "generator": "gpt-5.4-mini",
+    "embed": null,
+    "docs_k": 5,
+    "history_k": 3,
+    "split": "test",
+    "workers": 4
+  },
+  "tickets_in_split": 160,
+  "tickets_answered": 160,
+  "generation_errors": 0,
+  "tickets_judged": 160,
+  "accuracy": 0.45625,
+  "accuracy_ci95": [
+    0.3810004360046409,
+    0.5335511797022368
+  ],
+  "mean_score": 3.475,
+  "score_hist": {
+    "1": 1,
+    "2": 28,
+    "3": 58,
+    "4": 40,
+    "5": 33
+  },
+  "faithfulness": {
+    "no_citations": 160
+  },
+  "selective": {
+    "coverage": 1.0,
+    "accuracy_on_answered": 0.45625,
+    "accuracy_on_answered_ci95": [
+      0.3810004360046409,
+      0.5335511797022368
+    ],
+    "wrong_answers_shown": 87,
+    "correct_answers_escalated": 0
+  },
+  "commands": {
+    "answers_with_commands": 102,
+    "commands_total": 307,
+    "syntax_error_rate": 0.009771986970684038,
+    "unknown_command_rate": 0.026058631921824105,
+    "answers_with_invalid_command_rate": 0.06862745098039216,
+    "unknown_names_top": [
+      [
+        "{}",
+        2
+      ],
+      [
+        ",",
+        2
+      ],
+      [
+        "@reboot",
+        2
+      ],
+      [
+        "\n",
+        1
+      ],
+      [
+        "bbcp",
+        1
+      ],
+      [
+        "nixos-option",
+        1
+      ],
+      [
+        "repr",
+        1
+      ]
+    ]
+  },
+  "citations": {
+    "answers_with_citations_rate": 0.0,
+    "dangling_citation_rate": 0.0,
+    "cited_sources": {}
+  },
+  "latency_s": {
+    "total": {
+      "mean": 2.610823397056231,
+      "p50": 2.5460062944994206,
+      "p95": 3.770341262999864,
+      "max": 4.633808350999971
+    },
+    "stage_p50": {
+      "llm": 2.545614870999998,
+      "retrieval": 1.807750049920287e-05
+    }
+  },
+  "tokens_per_ticket": {
+    "input": 558.2125,
+    "output": 478.14375
+  },
+  "llm_calls_per_ticket": {
+    "mean": 1,
+    "p50": 1.0,
+    "p95": 1,
+    "max": 1
+  },
+  "cost_usd": {
+    "per_ticket": {
+      "mean": 0.00257030625,
+      "p50": 0.002514375,
+      "p95": 0.0043335,
+      "max": 0.0057915
+    },
+    "per_correct": 0.005633547945205479,
+    "generation_total": 0.411249,
+    "judge_total": 0.6583600000000001
+  },
+  "spot_check": {
+    "human_correct": null
+  }
+}

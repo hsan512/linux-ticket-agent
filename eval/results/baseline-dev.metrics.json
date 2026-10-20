@@ -1,0 +1,112 @@
+{
+  "run_id": "baseline-dev",
+  "config": {
+    "system": "rag",
+    "generator": "gpt-5.4-mini",
+    "embed": "text-embedding-3-small",
+    "docs_k": 5,
+    "history_k": 3,
+    "split": "dev",
+    "workers": 4
+  },
+  "tickets_in_split": 40,
+  "tickets_answered": 40,
+  "generation_errors": 0,
+  "tickets_judged": 40,
+  "accuracy": 0.425,
+  "accuracy_ci95": [
+    0.28509168524815875,
+    0.5780519956394001
+  ],
+  "mean_score": 3.3,
+  "score_hist": {
+    "2": 7,
+    "3": 16,
+    "4": 15,
+    "5": 2
+  },
+  "faithfulness": {
+    "partially_supported": 33,
+    "supported": 5,
+    "no_citations": 1,
+    "unsupported": 1
+  },
+  "selective": {
+    "coverage": 1.0,
+    "accuracy_on_answered": 0.425,
+    "accuracy_on_answered_ci95": [
+      0.28509168524815875,
+      0.5780519956394001
+    ],
+    "wrong_answers_shown": 23,
+    "correct_answers_escalated": 0
+  },
+  "commands": {
+    "answers_with_commands": 26,
+    "commands_total": 57,
+    "syntax_error_rate": 0.017543859649122806,
+    "unknown_command_rate": 0.017543859649122806,
+    "answers_with_invalid_command_rate": 0.038461538461538464,
+    "unknown_names_top": [
+      [
+        "*.*",
+        1
+      ]
+    ]
+  },
+  "citations": {
+    "answers_with_citations_rate": 0.975,
+    "dangling_citation_rate": 0.0,
+    "cited_sources": {
+      "D": 65,
+      "H": 43
+    }
+  },
+  "latency_s": {
+    "total": {
+      "mean": 3.0762728914249693,
+      "p50": 3.064774579499499,
+      "p95": 3.836803369000336,
+      "max": 4.010227718000351
+    },
+    "stage_p50": {
+      "llm": 2.4027557214999433,
+      "retrieval": 0.5393349430000853
+    }
+  },
+  "tokens_per_ticket": {
+    "input": 4728.875,
+    "output": 403.1
+  },
+  "llm_calls_per_ticket": {
+    "mean": 1,
+    "p50": 1.0,
+    "p95": 1,
+    "max": 1
+  },
+  "cost_usd": {
+    "per_ticket": {
+      "mean": 0.00537334125,
+      "p50": 0.00523007,
+      "p95": 0.00730612,
+      "max": 0.007909330000000001
+    },
+    "per_correct": 0.012643155882352942,
+    "generation_total": 0.21493365,
+    "judge_total": 0.353788
+  },
+  "spot_check": {
+    "human_correct": null,
+    "claude_correct": {
+      "n": 30,
+      "agreement": 0.8666666666666667,
+      "cohen_kappa": 0.7345132743362832,
+      "disagreements": [
+        752426,
+        793855,
+        782971,
+        800511
+      ]
+    }
+  }
+}

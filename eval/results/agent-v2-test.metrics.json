@@ -1,0 +1,134 @@
+{
+  "run_id": "agent-v2-test",
+  "config": {
+    "system": "agent_v2_grade",
+    "features": {
+      "grade_evidence": true
+    },
+    "generator": "gpt-5.4-mini",
+    "embed": "text-embedding-3-small",
+    "docs_k": 5,
+    "history_k": 3,
+    "max_steps": 16,
+    "context": {
+      "max_tool_calls": 4,
+      "tool_retries": 2,
+      "max_retrievals": 2
+    },
+    "prompts": {
+      "CLASSIFY": "You triage Linux/Unix support tickets. Classify the ticket.\n- issue_type: the main area of the problem.\n- risk_level: how much damage a wrong fix could do on the asker's system.\n- missing_info: only facts without which no reasonable answer is possible. Most tickets are answerable as written; leave it empty unless something essential is truly absent.",
+      "RETRIEVE": "You plan research for a Linux/Unix support ticket. You can search:\n- search_docs: man pages and GNU manuals (exact command/option/config behaviour)\n- search_similar: past solved Stack Exchange questions\nCall the searches that would help answer the ticket correctly, with focused queries. You may call several, or none if the answer is basic and certain without looking anything up.",
+      "GRADE": "You check retrieved passages before a Linux/Unix support ticket is answered.\nFor each passage, decide if it is relevant: it directly helps solve this specific ticket (the exact command, option, or config involved, or a past question with the same problem). Passages that are only on the same general topic are NOT relevant.\nThen decide if the relevant passages are sufficient to answer the ticket reliably. If not, say briefly what is missing.",
+      "REWRITE": "Earlier searches for this Linux/Unix support ticket did not find enough useful information. Plan new searches that target what is missing. Do not repeat earlier queries; use different terms, the specific command or config file involved, or the likely underlying cause.\n- search_docs: man pages and GNU manuals\n- search_similar: past solved Stack Exchange questions",
+      "DRAFT": "You are a Linux/Unix support engineer answering a user's ticket.\nYou may be given context passages: documentation excerpts (D1, D2, ...) and past solved questions with their accepted answers (H1, H2, ...).\n- Passages were retrieved automatically and may be irrelevant. Use only those that actually address the ticket, and cite the IDs you relied on. Ignore the rest.\n- If no passage helps, answer from your own knowledge with empty citations.\n- Prefer precise, minimal commands. Never invent commands or options.\n- List every shell command you propose in `commands`, exactly as it should be run.\n- Set confidence honestly."
+    },
+    "split": "test",
+    "workers": 4
+  },
+  "tickets_in_split": 160,
+  "tickets_answered": 160,
+  "generation_errors": 0,
+  "tickets_judged": 160,
+  "accuracy": 0.35,
+  "accuracy_ci95": [
+    0.28039680852544535,
+    0.42663730246956433
+  ],
+  "mean_score": 3.29375,
+  "score_hist": {
+    "1": 1,
+    "2": 37,
+    "3": 66,
+    "4": 26,
+    "5": 30
+  },
+  "faithfulness": {
+    "partially_supported": 128,
+    "unsupported": 9,
+    "supported": 12,
+    "no_citations": 11
+  },
+  "selective": {
+    "coverage": 1.0,
+    "accuracy_on_answered": 0.35,
+    "accuracy_on_answered_ci95": [
+      0.28039680852544535,
+      0.42663730246956433
+    ],
+    "wrong_answers_shown": 104,
+    "correct_answers_escalated": 0
+  },
+  "commands": {
+    "answers_with_commands": 88,
+    "commands_total": 221,
+    "syntax_error_rate": 0.01809954751131222,
+    "unknown_command_rate": 0.013574660633484163,
+    "answers_with_invalid_command_rate": 0.056818181818181816,
+    "unknown_names_top": [
+      [
+        "!=",
+        1
+      ],
+      [
+        "sd*",
+        1
+      ],
+      [
+        "*",
+        1
+      ],
+      [
+        "\\n",
+        1
+      ]
+    ]
+  },
+  "citations": {
+    "answers_with_citations_rate": 0.93125,
+    "dangling_citation_rate": 0.0,
+    "cited_sources": {
+      "D": 238,
+      "H": 116
+    }
+  },
+  "latency_s": {
+    "total": {
+      "mean": 6.849264055918775,
+      "p50": 6.29920302499977,
+      "p95": 9.737189528999806,
+      "max": 12.417798763000974
+    },
+    "stage_p50": {
+      "classify": 0.9519511549997333,
+      "draft": 2.1337173145002453,
+      "finalize": 0.0,
+      "grade_evidence": 1.3666475859990896,
+      "retrieve": 1.6300202750007884,
+      "rewrite_query": 0.0
+    }
+  },
+  "tokens_per_ticket": {
+    "input": 10817.65,
+    "output": 719.43125
+  },
+  "llm_calls_per_ticket": {
+    "mean": 4.475,
+    "p50": 4.0,
+    "p95": 6,
+    "max": 6
+  },
+  "cost_usd": {
+    "per_ticket": {
+      "mean": 0.011352099375,
+      "p50": 0.01053921,
+      "p95": 0.01973724,
+      "max": 0.02372952
+    },
+    "per_correct": 0.03243456964285714,
+    "generation_total": 1.8163359,
+    "judge_total": 1.280094
+  },
+  "spot_check": {
+    "human_correct": null
+  }
+}
