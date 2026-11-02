@@ -26,6 +26,8 @@ def keep_relevant(evidence: list[Evidence], grade: EvidenceGrade) -> list[Eviden
 
 
 def next_step(sufficient: bool, attempts: int, max_retrievals: int) -> str:
+    """Next node after grading: draft when the evidence suffices or no retrieval rounds are left
+    (whether to answer weak evidence is the escalation rule's job), otherwise rewrite_query."""
     if sufficient or attempts >= max_retrievals:
         return "draft"
     return "rewrite_query"

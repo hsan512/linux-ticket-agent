@@ -66,6 +66,8 @@ class SearchSimilar(BaseModel):
 
 
 class PassageGrade(BaseModel):
+    """The grader's verdict on one passage (part of EvidenceGrade)."""
+
     id: str = Field(description="Passage ID, e.g. D2 or H1.")
     relevant: bool = Field(description="True only if the passage directly helps solve this ticket.")
 

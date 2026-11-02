@@ -19,8 +19,10 @@ RULES: dict[str, Callable[[str, bool], bool]] = {
 
 
 def should_escalate(rule: str, confidence: str, insufficient: bool) -> bool:
+    """Apply the named rule; raises KeyError for a rule not in RULES."""
     return RULES[rule](confidence, insufficient)
 
 
 def escalation_reason(confidence: str, insufficient: bool) -> str:
+    """The inputs every rule looks at, recorded so a human can see why the ticket was handed off."""
     return f"confidence={confidence}, evidence_insufficient={insufficient}"

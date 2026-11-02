@@ -54,8 +54,14 @@ def to_record(item: dict, state: AgentState, wall_s: float) -> dict:
         "evidence_sufficient": state.get("evidence_sufficient"),
         "retrieval_attempts": state.get("retrieval_attempts", 0),
         "queries_tried": state.get("queries_tried", []),
+        # all None/empty when validate did not run; `validation` describes the last draft checked
+        "validation": [asdict(issue) for issue in state.get("validation", [])],
+        "validation_error": state.get("validation_error"),
+        "revise_attempts": state.get("revise_attempts", 0),
+        "decision_after_validate": state.get("decision_after_validate"),
         "classification": state["classification"].model_dump() if state.get("classification") else None,
         "draft": state["draft"].model_dump() if state.get("draft") else None,
+        "final_answer": state.get("final_answer"),  # None when escalated: nothing was shown to the asker
         "evidence": [e.model_dump(exclude={"text"}) for e in evidence],
         "evidence_text": {e.id: e.text for e in evidence},
         "trace": state["trace"],
@@ -69,9 +75,11 @@ def main() -> None:
     add_run_args(parser)
     parser.add_argument("--grade-evidence", action="store_true", help="enable grade_evidence + rewrite_query")
     parser.add_argument("--escalation-rule", choices=sorted(RULES), help="enable escalate with this rule")
+    parser.add_argument("--validate-revise", action="store_true", help="enable validate + revise")
     args = parser.parse_args()
 
-    features = Features(grade_evidence=args.grade_evidence, escalation_rule=args.escalation_rule)
+    features = Features(grade_evidence=args.grade_evidence, escalation_rule=args.escalation_rule,
+                        validate_revise=args.validate_revise)
     command_packages = load_command_packages(PROCESSED_DIR / "command_packages.json")
     command_lookup = CommandPackageLookup(command_packages)
     context = AgentContext(retriever=Retriever(), command_lookup=command_lookup)
@@ -92,7 +100,8 @@ def main() -> None:
 
     items = load_benchmark(PROCESSED_DIR / "benchmark.jsonl", args.split)
     run_jobs(items[: args.limit] if args.limit else items, work, out_path, args.budget_usd, args.workers,
-             describe=lambda r: f"{r['status']}, rounds={r['retrieval_attempts']}, tools={r['usage']['tool_calls']}")
+             describe=lambda r: (f"{r['status']}, rounds={r['retrieval_attempts']}, "
+                                 f"revisions={r['revise_attempts']}, tools={r['usage']['tool_calls']}"))
 
 
 if __name__ == "__main__":

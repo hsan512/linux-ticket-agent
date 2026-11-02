@@ -88,6 +88,8 @@ def syntax_error(cmd: str, timeout_s: float = 5.0) -> str | None:
 
 @dataclass
 class CommandCheck:
+    """Result of check_command for one command line (used by eval for the invalid-command rate)."""
+
     command: str
     syntax_error: str | None
     unknown_names: list[str] = field(default_factory=list)
@@ -105,7 +107,7 @@ def defined_functions(commands: list[str]) -> set[str]:
 def check_command(cmd: str, known: set[str]) -> CommandCheck:
     """`known` should include functions defined by the same answer (see defined_functions).
     UPPERCASE names are placeholders by our prompt convention (e.g. PDF_READER) and are skipped."""
-    unknown = [n for n in command_names(cmd) if n not in known and not _PLACEHOLDER.match(n)]
+    unknown = [n for n in command_names(cmd) if n not in known and not PLACEHOLDER.match(n)]
     return CommandCheck(command=cmd, syntax_error=syntax_error(cmd), unknown_names=unknown)
 
 
@@ -133,7 +135,7 @@ add-zsh-hook compinit promptinit zmv zcalc
 # at install time (e.g. `wine`) that never appear as a file in the package.
 _BIN_PATH = re.compile(r"^(?:(?:usr/)?(?:s?bin|games)|usr/share/bash-completion/completions)/([^/\s]+)\s")
 _FUNCTION_DEF = re.compile(r"(?:^|[;&|{(\s])(?:function\s+([\w.:-]+)|([\w.:-]+)\s*\(\)\s*\{)")
-_PLACEHOLDER = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PLACEHOLDER = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 def commands_from_contents(path: Path) -> set[str]:

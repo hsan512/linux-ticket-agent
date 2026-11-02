@@ -22,6 +22,8 @@ T = TypeVar("T", bound=BaseModel)
 
 @dataclass
 class Usage:
+    """Accounting for one API call; copied into the node's trace entry by llm_trace."""
+
     model: str
     input_tokens: int
     output_tokens: int  # includes reasoning tokens
@@ -32,22 +34,28 @@ class Usage:
 
 @dataclass
 class LLMResult(Usage, Generic[T]):
+    """Result of invoke_structured: usage plus the parsed schema object."""
+
     parsed: T | None = None
 
 
 @dataclass
 class ToolCallResult(Usage):
+    """Result of invoke_tools: usage plus the model's message (its tool_calls may be empty)."""
+
     message: AIMessage | None = None
 
 
 @lru_cache(maxsize=None)
 def chat_model(model: str, reasoning_effort: str | None = None) -> ChatOpenAI:
+    """One shared client per (model, reasoning_effort)."""
     # max_retries: the OpenAI client retries 429/5xx/timeouts with exponential backoff.
     # timeout 60s: normal calls take 1-10s; agent-v1-test had one call hang until a 180s timeout.
     return ChatOpenAI(model=model, reasoning_effort=reasoning_effort, max_retries=4, timeout=60)
 
 
 def _usage(model: str, message: AIMessage, latency_s: float) -> Usage:
+    """Token counts from the response metadata (0 when missing) and their cost."""
     usage = message.usage_metadata or {}
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)

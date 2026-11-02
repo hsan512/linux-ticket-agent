@@ -58,7 +58,7 @@ def _tool_fn(
 
 
 def run_tool(fn: Callable[[str], list[Evidence]], query: str, retries: int) -> tuple[list[Evidence], str | None]:
-    """Call a search tool, retrying on exceptions. Returns (results, last error or None)."""
+    """Call a tool, retrying on exceptions. Returns (results, last error or None)."""
     error = None
     for _ in range(retries + 1):
         try:

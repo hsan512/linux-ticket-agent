@@ -135,3 +135,21 @@ Offline measurements on existing runs (no API calls):
     same 160 tickets in agent_v1 and agent_v2: `risk_level` identical for 146 (91%), `issue_type`
     for 130 (81%). Neither is used for routing, so this is low-stakes today; do not route on them
     without measuring them first.
+24. **The generator runs with no reasoning.** No node sets `reasoning_effort`, and all saved runs
+    report 0 reasoning tokens (agent-v1-test 480 calls, agent-v2-test 676, baseline-test and
+    llm-only-test 160 each). Every accuracy, cost, and latency figure above is for this mode.
+    Turning reasoning on for `draft` or `grade_evidence` is an untested option and would raise
+    cost and latency, since reasoning tokens are billed as output.
+25. **With validate on, "answers with an invalid command" is no longer an independent metric.**
+    `validate` uses the same checks (`bash -n`, known command names), so a lower rate partly shows
+    the agent being told what the metric looks for (Goodhart). Compare validate on vs off for what
+    it costs and what it blocks; its case rests on safety (catastrophic commands stopped), not on
+    this rate. Also report how often a revision fixes the issue, and check whether the second
+    revision ever helps before keeping `max_revise_attempts = 2`.
+26. **The escalation rule runs before validate.** A ticket the rule escalates costs no revisions,
+    but a revised draft's confidence is not checked again, so a revision that lowers confidence
+    does not escalate. Not measured yet.
+27. **Warnings stay out of the judged answer.** `finalize` writes them to `final_answer`; the judge
+    scores `draft.answer`, so scores stay comparable with earlier runs and cannot be lowered by a
+    warning no passage supports. The cost is that the judged text is not exactly what the asker
+    sees.

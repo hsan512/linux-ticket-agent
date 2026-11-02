@@ -2,18 +2,21 @@
 trace aggregation, and graph wiring."""
 
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from agent.graph import Features, build_graph, route_after_draft
 from agent.nodes.escalate import escalate
+from agent.nodes.finalize import WARNING, finalize
 from agent.nodes.grade_evidence import keep_relevant, next_step
 from agent.nodes.retrieve import execute_tool_calls, renumber, retrieve, run_tool
-from agent.schemas import AgentDraft, Evidence, EvidenceGrade, PassageGrade
+from agent.schemas import AgentDraft, Classification, Evidence, EvidenceGrade, PassageGrade
 from agent.state import AgentContext
 from agent.tools.packages import CommandPackageLookup
-from eval.run_agent import summarize
+from agent.tools.validate import Issue
+from eval.run_agent import summarize, to_record
 
 
 def ev(source: str, url: str, text: str = "t") -> Evidence:
@@ -206,3 +209,268 @@ def test_retrieve_runs_planned_calls_without_llm_and_merges_kept_evidence() -> N
     assert out["retrieval_attempts"] == 2 and out["planned_calls"] == []
     assert out["queries_tried"] == ["search_similar: new", "check_command: ls"]  # unknown tool left out
     assert not any("model" in t for t in out["trace"])
+
+
+def _issues(*kinds: str) -> list:
+    from agent.tools.validate import Issue
+    return [Issue("cmd", kind, "msg") for kind in kinds]
+
+
+@pytest.mark.parametrize(("kinds", "error", "attempts", "expected"), [
+    ((), None, 0, "finalize"),
+    ((), "TimeoutExpired()", 0, "escalate"),                  # unchecked is never shown as clean
+    (("catastrophic",), None, 0, "revise"),
+    (("catastrophic",), None, 1, "revise"),
+    (("catastrophic",), None, 2, "escalate"),                 # out of revisions
+    (("syntax",), None, 2, "escalate"),
+    (("unknown_command",), None, 0, "revise"),
+    (("unknown_command",), None, 1, "finalize"),              # noisy signal: one retry at most
+    (("destructive",), None, 0, "finalize"),                  # warned in finalize, never revised
+    (("destructive", "catastrophic"), None, 0, "revise"),     # the worst issue decides
+    (("unknown_command", "syntax"), None, 1, "revise"),
+])
+def test_decision_after_validate(kinds: tuple[str, ...], error: str | None, attempts: int, expected: str) -> None:
+    from agent.nodes.validate import decision_after_validate
+    assert decision_after_validate(_issues(*kinds), error, attempts, 2) == expected
+
+
+def _validate_state(commands: list[str], ticket: str = "t") -> dict:
+    return {"ticket": ticket, "draft": AgentDraft(answer="a", commands=commands, citations=[], confidence="high")}
+
+
+def test_validate_node_records_issues_and_trace() -> None:
+    from agent.nodes.validate import validate
+    lookup = CommandPackageLookup({"noble": {"ls": ["coreutils"], "rm": ["coreutils"]}})
+    runtime = SimpleNamespace(context=AgentContext(retriever=FakeRetriever(), command_lookup=lookup))
+    out = validate(_validate_state(["ls -la", "rm -rf ./build", "frobnicate"]), runtime)
+    assert [i.kind for i in out["validation"]] == ["destructive", "unknown_command"]
+    assert out["validation_error"] is None
+    [t] = out["trace"]
+    assert (t["node"], t["commands"], t["cost_usd"], t["error"]) == ("validate", 3, 0.0, None)
+    assert t["issue_counts"] == {"destructive": 1, "unknown_command": 1} and type(t["issue_counts"]) is dict
+
+
+def test_validate_node_with_no_commands() -> None:
+    from agent.nodes.validate import validate
+    runtime = SimpleNamespace(context=AgentContext(retriever=FakeRetriever(), command_lookup=LOOKUP))
+    out = validate(_validate_state([]), runtime)
+    assert out["validation"] == [] and out["validation_error"] is None and out["trace"][0]["commands"] == 0
+
+
+def test_validate_node_failure_is_recorded_not_reported_as_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    import agent.nodes.validate as node
+
+    def hang(*args: object, **kwargs: object) -> list:
+        raise subprocess.TimeoutExpired(cmd="bash -n", timeout=5)
+
+    monkeypatch.setattr(node, "validate_commands", hang)
+    runtime = SimpleNamespace(context=AgentContext(retriever=FakeRetriever(), command_lookup=LOOKUP))
+    out = node.validate(_validate_state(["ls"]), runtime)
+    assert out["validation"] == []
+    assert "TimeoutExpired" in out["validation_error"]          # routing can tell "unchecked" from "clean"
+    assert "TimeoutExpired" in out["trace"][0]["error"]
+
+
+def test_revise_node_replaces_the_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agent.nodes.revise as node
+    from agent.llm import LLMResult
+    from agent.tools.validate import Issue
+
+    new = AgentDraft(answer="fixed", commands=['rm -rf "${DIR:?}"/'], citations=["D1"], confidence="medium")
+    sent = []
+
+    def fake_llm(model: str, schema: type, messages: list) -> LLMResult:
+        sent.append(messages[1].content)
+        return LLMResult(model=model, input_tokens=10, output_tokens=5, reasoning_tokens=0, cost_usd=0.001,
+                         latency_s=0.1, parsed=new)
+
+    monkeypatch.setattr(node, "invoke_structured", fake_llm)
+    old = AgentDraft(answer="old", commands=["cd /tmp", "rm -rf $DIR/", "dd if=x of=/dev/sda", r"find . -name \*.log"],
+                     citations=["D1"], confidence="high")
+    state = {"ticket": "clean my build dir", "draft": old, "revise_attempts": 1,
+             "evidence": [Evidence(id="D1", source="docs", title="rm(1)", url="u", text="rm removes", score=0.5)],
+             "validation": [Issue("rm -rf $DIR/", "catastrophic", "rm -rf /: recursive delete of /"),
+                            Issue("dd if=x of=/dev/sda", "destructive", "dd: overwrites a disk")]}
+    out = node.revise(state)
+
+    assert out["draft"] is new and out["revise_attempts"] == 2
+    [t] = out["trace"]
+    assert t["node"] == "revise" and t["cost_usd"] == 0.001
+    [user] = sent
+    assert "clean my build dir" in user and "[D1] rm(1)" in user          # ticket and passages
+    assert "cd /tmp" in user                                              # every old command, not only the bad ones
+    assert r"find . -name \*.log" in user and r"\\*" not in user           # exact text, not a Python list repr
+    assert "recursive delete of /" in user
+    assert "overwrites a disk" not in user                                # destructive is warned, not revised
+
+
+@pytest.mark.parametrize(("features", "version"), [
+    (Features(), "agent_v1_minimal"),
+    (Features(grade_evidence=True), "agent_v2_grade"),
+    (Features(validate_revise=True), "agent_v4_validate_nograde"),
+    (Features(grade_evidence=True, validate_revise=True), "agent_v4_validate"),
+    (Features(grade_evidence=True, validate_revise=True, escalation_rule="confidence_low"),
+     "agent_v4_validate_confidence_low"),
+])
+def test_version_names_differ_by_feature(features: Features, version: str) -> None:
+    assert features.version == version
+
+
+def test_graph_with_validate_needs_no_escalation_rule() -> None:
+    graph = build_graph(Features(validate_revise=True)).get_graph()
+    assert {"validate", "revise", "escalate"} <= set(graph.nodes)
+    assert ("revise", "validate") in {(e.source, e.target) for e in graph.edges}
+    assert ("escalate", "__end__") in {(e.source, e.target) for e in graph.edges}
+
+
+def test_graph_without_validate_is_unchanged() -> None:
+    assert not {"validate", "revise", "escalate"} & set(build_graph(Features(grade_evidence=True)).get_graph().nodes)
+
+
+def _usage(**extra: object) -> dict:
+    return {"model": "m", "input_tokens": 1, "output_tokens": 1, "reasoning_tokens": 0, "cost_usd": 0.0,
+            "latency_s": 0.0, **extra}
+
+
+def _run(monkeypatch: pytest.MonkeyPatch, features: Features, *commands: list[str], confidence: str = "high") -> dict:
+    """Run the whole graph on a fake LLM: `commands` are the successive drafts (draft, then each revise)."""
+    import agent.nodes.classify
+    import agent.nodes.draft
+    import agent.nodes.retrieve
+    import agent.nodes.revise
+    import agent.nodes.rewrite_query
+    from agent.graph import run_ticket
+    from agent.llm import LLMResult, ToolCallResult
+
+    drafts = iter(AgentDraft(answer="a", commands=c, citations=[], confidence=confidence) for c in commands)
+    write = lambda model, schema, messages: LLMResult(**_usage(), parsed=next(drafts))  # noqa: E731
+    classification = Classification(issue_type="other", risk_level="low", missing_info=[])
+    monkeypatch.setattr(agent.nodes.classify, "invoke_structured",
+                        lambda model, schema, messages: LLMResult(**_usage(), parsed=classification))
+    monkeypatch.setattr(agent.nodes.draft, "invoke_structured", write)
+    monkeypatch.setattr(agent.nodes.revise, "invoke_structured", write)
+    no_calls = lambda model, tools, messages: ToolCallResult(**_usage())  # noqa: E731
+    monkeypatch.setattr(agent.nodes.retrieve, "invoke_tools", no_calls)
+    monkeypatch.setattr(agent.nodes.rewrite_query, "invoke_tools", no_calls)
+    lookup = CommandPackageLookup({"noble": {"ls": ["coreutils"], "rm": ["coreutils"], "dd": ["coreutils"]}})
+    return run_ticket(build_graph(features), "t", AgentContext(retriever=FakeRetriever(), command_lookup=lookup))
+
+
+def _nodes(state: dict) -> list[str]:
+    return [t["node"] for t in state["trace"] if t["node"] in ("validate", "revise", "escalate", "finalize")]
+
+
+VALIDATE = Features(validate_revise=True)
+
+
+def test_graph_clean_draft_is_finalized(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["ls"])
+    assert out["status"] == "answered" and _nodes(out) == ["validate", "finalize"]
+
+
+def test_graph_revises_then_finalizes(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["rm -rf /"], ["ls"])
+    assert out["status"] == "answered" and out["draft"].commands == ["ls"] and out["revise_attempts"] == 1
+    assert _nodes(out) == ["validate", "revise", "validate", "finalize"]
+
+
+def test_graph_escalates_when_revisions_run_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["rm -rf /"], ["rm -rf /"], ["rm -rf /"])
+    assert out["status"] == "escalated" and out["revise_attempts"] == 2
+    assert _nodes(out) == ["validate", "revise", "validate", "revise", "validate", "escalate"]
+    reason = out["escalation_reason"]
+    assert "after 2 revisions" in reason and "`rm -rf /` (catastrophic)" in reason
+    assert "confidence" not in reason                                   # not the rule's reason
+
+
+def test_graph_unknown_command_gets_one_revision_then_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["frobnicate"], ["frobnicate"])
+    assert out["status"] == "answered" and out["revise_attempts"] == 1
+
+
+def test_graph_destructive_is_not_revised(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["rm -rf ./build"])
+    assert out["status"] == "answered" and _nodes(out) == ["validate", "finalize"]
+
+
+def test_graph_failed_check_escalates_with_its_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agent.nodes.validate as node
+
+    def hang(*args: object) -> list:
+        raise TimeoutError("bash -n")
+
+    monkeypatch.setattr(node, "validate_commands", hang)
+    out = _run(monkeypatch, VALIDATE, ["ls"])
+    assert out["status"] == "escalated" and _nodes(out) == ["validate", "escalate"]
+    assert "could not run" in out["escalation_reason"] and "TimeoutError" in out["escalation_reason"]
+
+
+def test_graph_rule_is_checked_before_validate(monkeypatch: pytest.MonkeyPatch) -> None:
+    features = Features(validate_revise=True, escalation_rule="confidence_low")
+    out = _run(monkeypatch, features, ["rm -rf /"], confidence="low")
+    assert out["status"] == "escalated" and _nodes(out) == ["escalate"]
+    assert "confidence=low" in out["escalation_reason"]
+
+
+def test_graph_longest_path_fits_max_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    features = Features(grade_evidence=True, validate_revise=True)        # no evidence: uses every retrieval round
+    out = _run(monkeypatch, features, ["rm -rf /"], ["rm -rf /"], ["rm -rf /"])
+    assert out["status"] == "escalated" and out["retrieval_attempts"] == 2 and out["revise_attempts"] == 2
+
+
+def test_record_saves_validation_as_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _run(monkeypatch, VALIDATE, ["rm -rf /"], ["rm -rf ./build"])
+    record = to_record({"question_id": 1, "split": "dev"}, state, wall_s=1.0)
+    assert json.loads(json.dumps(record))["revise_attempts"] == 1            # Issue objects would not serialize
+    assert record["decision_after_validate"] == "finalize" and record["validation_error"] is None
+    assert [i["kind"] for i in record["validation"]] == ["destructive"]      # issues of the last check, as dicts
+
+
+def test_record_without_validate_has_empty_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    record = to_record({"question_id": 1, "split": "dev"}, _run(monkeypatch, Features(), ["ls"]), wall_s=1.0)
+    assert record["validation"] == [] and record["revise_attempts"] == 0 and record["decision_after_validate"] is None
+
+
+def _finalize(*kinds: str, validation: bool = True) -> tuple[dict, AgentDraft]:
+    draft = AgentDraft(answer="Run it.", commands=["c"], citations=["D1"], confidence="high")
+    state = {"draft": draft, "validation": [Issue(f"cmd{i}", kind, f"msg{i}") for i, kind in enumerate(kinds)]}
+    if not validation:
+        del state["validation"]
+    return finalize(state), draft
+
+
+@pytest.mark.parametrize(("kinds", "validation"), [
+    ((), False),                 # validate is off
+    ((), True),
+    (("unknown_command",), True),
+])
+def test_finalize_without_destructive_shows_the_draft(kinds: tuple[str, ...], validation: bool) -> None:
+    out, draft = _finalize(*kinds, validation=validation)
+    assert out["status"] == "answered" and out["final_answer"] == "Run it."
+
+
+def test_finalize_warns_about_destructive_commands_first() -> None:
+    out, _ = _finalize("destructive", "unknown_command", "destructive")
+    text = out["final_answer"]
+    assert text.startswith(WARNING) and text.endswith("Run it.")
+    assert "- `cmd0` (destructive): msg0" in text and "- `cmd2` (destructive): msg2" in text
+    assert "cmd1" not in text                                       # only destructive issues are warned about
+
+
+def test_finalize_leaves_the_draft_for_the_judge() -> None:
+    out, draft = _finalize("destructive")
+    assert "draft" not in out and draft.answer == "Run it."
+
+
+def test_graph_warning_reaches_the_asker_but_not_the_judge(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _run(monkeypatch, VALIDATE, ["rm -rf ./build"])
+    record = to_record({"question_id": 1, "split": "dev"}, state, wall_s=1.0)
+    assert record["final_answer"].startswith(WARNING) and "rm -rf ./build" in record["final_answer"]
+    assert record["draft"]["answer"] == "a"
+
+
+def test_escalated_ticket_has_no_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _run(monkeypatch, VALIDATE, ["rm -rf /"], ["rm -rf /"], ["rm -rf /"])
+    assert to_record({"question_id": 1, "split": "dev"}, state, wall_s=1.0)["final_answer"] is None

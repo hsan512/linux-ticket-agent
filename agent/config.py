@@ -34,5 +34,6 @@ PRICES: dict[str, tuple[float, float]] = {
 
 
 def cost_usd(model: str, input_tokens: int, output_tokens: int = 0) -> float:
+    """Cost of one call from PRICES; raises KeyError for a model without a price."""
     price_in, price_out = PRICES[model]
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000

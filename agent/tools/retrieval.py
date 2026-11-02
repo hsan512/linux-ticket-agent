@@ -10,7 +10,7 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
-from agent.config import DOCS_COLLECTION, EMBED_MODEL, HISTORY_COLLECTION, QDRANT_URL, PACKAGE_COLLECTION
+from agent.config import DOCS_COLLECTION, EMBED_MODEL, HISTORY_COLLECTION, QDRANT_URL
 from agent.schemas import Evidence
 
 MAX_HISTORY_ANSWER_CHARS = 2000
@@ -36,6 +36,7 @@ def _doc_evidence(hit: NodeWithScore, idx: int) -> Evidence:
 
 
 def _history_evidence(hit: NodeWithScore, idx: int) -> Evidence:
+    """The past question (the embedded text) plus its accepted answer, truncated, with attribution."""
     md = hit.node.metadata
     text = (f"Past question: {hit.node.get_content()}\n\n"
             f"Accepted answer (by {md['answer_author']}, {md['license']}):\n"
@@ -50,6 +51,9 @@ def format_context(evidence: list[Evidence]) -> str:
 
 
 class Retriever:
+    """Both vector-search tools over one Qdrant connection. IDs are D1.., H1.. per call; retrieve
+    renumbers them across calls."""
+
     def __init__(self, docs_k: int = 5, history_k: int = 3, url: str = QDRANT_URL) -> None:
         client = QdrantClient(url=url)
         self._docs = _retriever(client, DOCS_COLLECTION, docs_k)

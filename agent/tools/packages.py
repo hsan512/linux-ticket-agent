@@ -1,3 +1,10 @@
+"""Which Ubuntu packages ship a command, from the Contents indexes of the supported releases.
+
+data/build_packages.py builds the release -> command -> packages table once (offline); at run
+time the table backs the check_command tool (CommandPackageLookup.lookup_command) and the
+validate node's unknown-command check (CommandPackageLookup.packages).
+"""
+
 from __future__ import annotations
 
 import gzip
@@ -108,6 +115,10 @@ class CommandPackageLookup:
         # newest first (RELEASE_NAMES order), then unknown codenames alphabetically
         known = [r for r in RELEASE_NAMES if r in command_packages]
         self._releases = known + sorted(set(command_packages) - set(RELEASE_NAMES))
+
+    def packages(self, command: str) -> dict[str, list[str]]:
+        """Packages per release, {} if not found anywhere (see lookup_command_packages)."""
+        return lookup_command_packages(command, self._command_packages)
 
     def lookup_command(self, command: str) -> list[Evidence]:
         """Look up one command; always returns exactly one Evidence (id is renumbered later)."""
