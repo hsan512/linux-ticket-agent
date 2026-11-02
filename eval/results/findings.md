@@ -153,3 +153,21 @@ Offline measurements on existing runs (no API calls):
     scores `draft.answer`, so scores stay comparable with earlier runs and cannot be lowered by a
     warning no passage supports. The cost is that the judged text is not exactly what the asker
     sees.
+28. **First validate run (agent-v4-dev, 40 tickets): `unknown_command` did harm.** No syntax or
+    catastrophic issue appeared, so all 5 revisions came from `unknown_command`, and all 5 were
+    false alarms: `awk` twice (an alternatives name), a `$VARIABLE`, an absolute path, and
+    `grub2-install` on a Fedora ticket. One revision broke a working command: `awk '$1 >= 3'`
+    became a `grep` whose pattern misses counts 10-29 (read by hand; this run is not judged).
+    So `unknown_command` no longer causes a revision: `finalize` lists those commands in a note.
+    `needs_lookup` now skips paths, variables, parser noise, and alternatives names; a scan of
+    the saved runs also found that bashlex crashes on comment-only lines such as `#!/bin/bash`,
+    which would have escalated the ticket. Revising syntax or catastrophic issues has still
+    not been exercised on a real model.
+29. **`revise` fixes blocking issues on the real model (six hand-made drafts, not a measurement).**
+    All five drafts with a syntax or catastrophic issue came back without one after one revision:
+    `rm -rf $BUILD_DIR/` became `rm -rf -- "${BUILD_DIR:?}/"`, a missing `done` was added, and
+    `rm -rf --no-preserve-root /` was dropped for install-media advice. Weak spots: it added
+    citations it did not use, and it invented a path while keeping confidence high (`REVISE` was
+    tightened after this and not re-tested). Passing the check does not make a command good:
+    `chmod -R 777` on an invented uploads path passes with only a destructive warning. `bash -n`
+    also misses `if [ -f x ; then`, since `[` is an ordinary command until it runs.

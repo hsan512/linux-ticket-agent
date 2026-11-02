@@ -56,6 +56,7 @@ class AgentState(TypedDict, total=False):
     validation: list[Issue]  # problems the validate node found in the draft's commands
     validation_error: str | None  # set when the check itself failed: the draft is unchecked, not clean
     revise_attempts: int  # how many times the draft has been revised after validation issues
+    revisions: Annotated[list[dict], operator.add]  # {"draft", "issues"} each revise replaced, oldest first
     decision_after_validate: str  # "revise", "finalize", or "escalate" after validate
     final_answer: str  # after finalize: the answer to show the user (draft.answer + warnings)
     status: Status

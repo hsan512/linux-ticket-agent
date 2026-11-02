@@ -20,11 +20,10 @@ def decision_after_validate(
 
     - check failed (`error`): escalate, an unchecked answer is never shown as if it had passed
     - syntax / catastrophic: revise while attempts are left, then escalate
-    - unknown_command: revise only if no revision has been made yet, then finalize anyway
-    - destructive only, or no issues: finalize (finalize adds the warning)
+    - anything else: finalize, which warns about unknown_command and destructive commands
 
-    `revise_attempts` counts revisions already made for any reason (one shared counter), so an
-    unknown_command that first appears after a revision is not revised.
+    unknown_command never causes a revision: on the dev run all 5 were false alarms and one
+    revision broke a working command (eval/results/findings.md, item 28).
     """
     if error:
         return "escalate"
@@ -35,14 +34,6 @@ def decision_after_validate(
             return "revise"
         else:
             return "escalate"
-
-    # unknown_command is a noisy signal (mostly parser noise in past runs): one retry at most
-    if "unknown_command" in issue_kinds:
-        if revise_attempts > 0:
-            return "finalize"
-        else:
-            return "revise"
-
     return "finalize"
 
 

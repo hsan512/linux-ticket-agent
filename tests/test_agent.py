@@ -9,7 +9,7 @@ import pytest
 
 from agent.graph import Features, build_graph, route_after_draft
 from agent.nodes.escalate import escalate
-from agent.nodes.finalize import WARNING, finalize
+from agent.nodes.finalize import UNKNOWN_NOTE, WARNING, finalize
 from agent.nodes.grade_evidence import keep_relevant, next_step
 from agent.nodes.retrieve import execute_tool_calls, renumber, retrieve, run_tool
 from agent.schemas import AgentDraft, Classification, Evidence, EvidenceGrade, PassageGrade
@@ -223,8 +223,7 @@ def _issues(*kinds: str) -> list:
     (("catastrophic",), None, 1, "revise"),
     (("catastrophic",), None, 2, "escalate"),                 # out of revisions
     (("syntax",), None, 2, "escalate"),
-    (("unknown_command",), None, 0, "revise"),
-    (("unknown_command",), None, 1, "finalize"),              # noisy signal: one retry at most
+    (("unknown_command",), None, 0, "finalize"),              # warned in finalize, never revised
     (("destructive",), None, 0, "finalize"),                  # warned in finalize, never revised
     (("destructive", "catastrophic"), None, 0, "revise"),     # the worst issue decides
     (("unknown_command", "syntax"), None, 1, "revise"),
@@ -292,7 +291,8 @@ def test_revise_node_replaces_the_draft(monkeypatch: pytest.MonkeyPatch) -> None
     state = {"ticket": "clean my build dir", "draft": old, "revise_attempts": 1,
              "evidence": [Evidence(id="D1", source="docs", title="rm(1)", url="u", text="rm removes", score=0.5)],
              "validation": [Issue("rm -rf $DIR/", "catastrophic", "rm -rf /: recursive delete of /"),
-                            Issue("dd if=x of=/dev/sda", "destructive", "dd: overwrites a disk")]}
+                            Issue("dd if=x of=/dev/sda", "destructive", "dd: overwrites a disk"),
+                            Issue("cd /tmp", "unknown_command", "cd: never reaches the reviser")]}
     out = node.revise(state)
 
     assert out["draft"] is new and out["revise_attempts"] == 2
@@ -304,6 +304,7 @@ def test_revise_node_replaces_the_draft(monkeypatch: pytest.MonkeyPatch) -> None
     assert r"find . -name \*.log" in user and r"\\*" not in user           # exact text, not a Python list repr
     assert "recursive delete of /" in user
     assert "overwrites a disk" not in user                                # destructive is warned, not revised
+    assert "never reaches the reviser" not in user                        # so is unknown_command
 
 
 @pytest.mark.parametrize(("features", "version"), [
@@ -385,9 +386,17 @@ def test_graph_escalates_when_revisions_run_out(monkeypatch: pytest.MonkeyPatch)
     assert "confidence" not in reason                                   # not the rule's reason
 
 
-def test_graph_unknown_command_gets_one_revision_then_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    out = _run(monkeypatch, VALIDATE, ["frobnicate"], ["frobnicate"])
+def test_graph_unknown_command_is_warned_not_revised(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["frobnicate"])
+    assert out["status"] == "answered" and _nodes(out) == ["validate", "finalize"]
+    assert out["final_answer"].startswith(UNKNOWN_NOTE) and "frobnicate" in out["final_answer"]
+
+
+def test_graph_unknown_command_does_not_stop_other_fixes(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _run(monkeypatch, VALIDATE, ["frobnicate", "rm -rf /"], ["frobnicate", "ls"])
     assert out["status"] == "answered" and out["revise_attempts"] == 1
+    assert [i.kind for i in out["revisions"][0]["issues"]] == ["catastrophic"]   # unknown_command not sent
+    assert out["final_answer"].startswith(UNKNOWN_NOTE)
 
 
 def test_graph_destructive_is_not_revised(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,6 +435,8 @@ def test_record_saves_validation_as_json(monkeypatch: pytest.MonkeyPatch) -> Non
     assert json.loads(json.dumps(record))["revise_attempts"] == 1            # Issue objects would not serialize
     assert record["decision_after_validate"] == "finalize" and record["validation_error"] is None
     assert [i["kind"] for i in record["validation"]] == ["destructive"]      # issues of the last check, as dicts
+    [revision] = record["revisions"]                                         # what the revision replaced, and why
+    assert revision["draft"]["commands"] == ["rm -rf /"] and revision["issues"][0]["kind"] == "catastrophic"
 
 
 def test_record_without_validate_has_empty_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -444,19 +455,17 @@ def _finalize(*kinds: str, validation: bool = True) -> tuple[dict, AgentDraft]:
 @pytest.mark.parametrize(("kinds", "validation"), [
     ((), False),                 # validate is off
     ((), True),
-    (("unknown_command",), True),
+    (("syntax",), True),         # cannot reach finalize; no heading for it, so nothing is shown
 ])
-def test_finalize_without_destructive_shows_the_draft(kinds: tuple[str, ...], validation: bool) -> None:
+def test_finalize_without_warnings_shows_the_draft(kinds: tuple[str, ...], validation: bool) -> None:
     out, draft = _finalize(*kinds, validation=validation)
     assert out["status"] == "answered" and out["final_answer"] == "Run it."
 
 
-def test_finalize_warns_about_destructive_commands_first() -> None:
-    out, _ = _finalize("destructive", "unknown_command", "destructive")
-    text = out["final_answer"]
-    assert text.startswith(WARNING) and text.endswith("Run it.")
-    assert "- `cmd0` (destructive): msg0" in text and "- `cmd2` (destructive): msg2" in text
-    assert "cmd1" not in text                                       # only destructive issues are warned about
+def test_finalize_lists_risky_commands_first() -> None:
+    out, _ = _finalize("unknown_command", "destructive", "destructive")
+    assert out["final_answer"] == (f"{WARNING}\n- `cmd1` (destructive): msg1\n- `cmd2` (destructive): msg2\n\n"
+                                   f"{UNKNOWN_NOTE}\n- `cmd0` (unknown_command): msg0\n\nRun it.")
 
 
 def test_finalize_leaves_the_draft_for_the_judge() -> None:

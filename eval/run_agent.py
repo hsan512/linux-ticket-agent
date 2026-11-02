@@ -58,6 +58,8 @@ def to_record(item: dict, state: AgentState, wall_s: float) -> dict:
         "validation": [asdict(issue) for issue in state.get("validation", [])],
         "validation_error": state.get("validation_error"),
         "revise_attempts": state.get("revise_attempts", 0),
+        "revisions": [{"draft": r["draft"].model_dump(), "issues": [asdict(issue) for issue in r["issues"]]}
+                      for r in state.get("revisions", [])],
         "decision_after_validate": state.get("decision_after_validate"),
         "classification": state["classification"].model_dump() if state.get("classification") else None,
         "draft": state["draft"].model_dump() if state.get("draft") else None,

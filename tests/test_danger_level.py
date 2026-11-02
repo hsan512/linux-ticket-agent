@@ -317,3 +317,8 @@ def test_findings_name_the_real_command() -> None:
     assert [(f.level, f.command) for f in findings] == [            # the commands inside, not "sudo sh -c ..."
         ("catastrophic", "rm -rf /"), ("destructive", "rm -rf /tmp/x")]  # both reported, worst first
     assert find_dangers("curl -fsSL https://x.sh | sudo bash")[0].reason.startswith("runs a script from curl")
+
+
+@pytest.mark.parametrize("line", ["#!/bin/bash", "# just a note"])
+def test_comment_only_line_is_harmless(line: str) -> None:
+    assert dl.commands(line) == [] and find_dangers(line) == []       # bashlex itself crashes on these

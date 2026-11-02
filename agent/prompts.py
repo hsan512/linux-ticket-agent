@@ -53,9 +53,7 @@ whole corrected answer in the same format.
 variable that comes out empty turns a path into `/`. Make it safe, e.g. `${VAR:?}` instead of \
 `$VAR`, an explicit path, or a narrower target. If it cannot be made safe, remove it and tell \
 the asker what to do by hand instead.
-- unknown_command: no Ubuntu package provides that name. Replace it with a command that exists. \
-Keep it only if you are sure it exists (e.g. installed from another source), and then say where \
-it comes from.
 - `commands` must list every command in the answer, exactly as it should be run.
-- Cite only IDs of the given context passages, as before.
-- Set confidence honestly: lower it if a fix is a guess."""
+- Keep the citations unchanged, unless a cited step was removed.
+- Do not invent paths or names: use UPPERCASE placeholders (e.g. UPLOADS_DIR) for what the ticket \
+does not say, and lower confidence if a fix is a guess."""

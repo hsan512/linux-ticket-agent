@@ -21,6 +21,15 @@ test times trap true type typeset ulimit umask unalias unset wait
 if then else elif fi case esac for select while until do done in function time { } ! [[ ]] coproc
 """.split())
 
+# Names the Debian alternatives system creates at install time, so no package lists them as files
+ALTERNATIVES = frozenset("""
+awk nawk vi view ex editor pager java javac jar cc c++ iptables ip6tables iptables-save
+iptables-restore ip6tables-save ip6tables-restore arptables ebtables netcat rsh rlogin rcp telnet
+ftp x-terminal-emulator x-www-browser www-browser lzma unlzma mt aptitude
+""".split())
+
+COMMAND_NAME = re.compile(r"[A-Za-z0-9_][\w.+-]*")
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -55,9 +64,13 @@ def context_names(commands: list[str], ticket: str) -> set[str]:
 
 
 def needs_lookup(name: str, context: set[str]) -> bool:
-    """False for names known without the package table: bash/zsh builtins, UPPERCASE placeholders
-    (the draft prompt's convention, e.g. PDF_READER), and context names."""
-    return not (name in BASH_BUILTINS or name in ZSH_BUILTINS or PLACEHOLDER.match(name) or name in context)
+    """False for what the package table cannot answer: anything not shaped like a command name
+    (paths, $variables, parser noise such as `*` or `@reboot`), bash/zsh builtins, alternatives,
+    UPPERCASE placeholders (the draft prompt's convention, e.g. PDF_READER), and context names."""
+    return bool(COMMAND_NAME.fullmatch(name)) and not (
+        name in BASH_BUILTINS or name in ZSH_BUILTINS or name in ALTERNATIVES
+        or PLACEHOLDER.match(name) or name in context
+    )
 
 
 def command_names(line: str) -> set[str]:

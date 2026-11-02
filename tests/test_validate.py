@@ -59,6 +59,20 @@ def test_context_names() -> None:
         ("backup_db.sh", False),  # mentioned in the ticket
         ("ifconfg", True),      # must be looked up
         ("rm", True),           # real, but its existence comes from the package table
+        ("awk", False),         # alternatives: no package lists the name
+        ("iptables", False),
+        ("/home/me/.pyenv/bin/python", False),  # paths and variables are not names to look up
+        ("./deploy.sh", False),
+        ("$PDF_READER", False),
+        ("$(dircolors)", False),
+        ("*", False),           # parser noise
+        ("sd*", False),
+        ("@reboot", False),
+        ("ips+=", False),
+        ("\n", False),
+        ("grub-install", True),
+        ("gcc-13", True),
+        ("g++", True),
     ],
 )
 def test_needs_lookup(name: str, expected: bool) -> None:

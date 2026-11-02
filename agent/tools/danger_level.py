@@ -490,8 +490,8 @@ def commands(cmd: str) -> list[SimpleCommand]:
     Raises ValueError if even the fallback fails (unbalanced quotes)."""
     try:
         return parse_commands(cmd)
-    except (bashlex.errors.ParsingError, NotImplementedError):
-        return approximate_commands(cmd)
+    except (bashlex.errors.ParsingError, NotImplementedError, AttributeError):
+        return approximate_commands(cmd)  # AttributeError: bashlex crashes on a comment-only line
 
 
 def _rule_for(name: str) -> Rule | None:
