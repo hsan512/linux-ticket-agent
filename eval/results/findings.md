@@ -171,3 +171,21 @@ Offline measurements on existing runs (no API calls):
     tightened after this and not re-tested). Passing the check does not make a command good:
     `chmod -R 777` on an invented uploads path passes with only a destructive warning. `bash -n`
     also misses `if [ -f x ; then`, since `[` is an ordinary command until it runs.
+30. **Escalation rule selected: `confidence_not_high` (dev, 40 tickets).** Selected on agent-v4-dev-2
+    with the item 15 criterion: coverage 57.5%, accuracy on answered 52.2%, against 42.5% with no
+    rule. **Deviation from item 15:** it names agent_v2, but agent-v2-dev failed (40 of 40 errors),
+    so the selection used the validate run instead. That run made no revisions, so it answers as
+    agent_v2 would, and the $0.82 rerun was skipped. The margin is small: `not_high_or_insufficient`
+    is 50.0% at 50% coverage, about one ticket away. The new `unknown_command` policy brought
+    false alarms from 5 tickets to 1 (`grub2-install` on Fedora, noted, not revised). Validate
+    changed no answer on this run, so it cannot move accuracy here.
+31. **Final config on test (agent-v4-test, 160 tickets, one run): selective accuracy, no overall gain.**
+    `--grade-evidence --validate-revise --escalation-rule confidence_not_high`. Answered 108 of 160
+    (67.5% coverage), 50 correct: 46.3% on answered, Wilson CI 37.2-55.7%. All drafts, escalated
+    included: 56/160 = 35.0%, the same as agent_v2 (16 tickets each way, and v4 also differs from v2
+    in tool, cap, and prompts). llm_only stays highest overall at 45.6% with full coverage, and its
+    interval overlaps the 46.3%. The rule works as a filter: the 52 escalated drafts held 46 of the
+    104 wrong answers and 6 of the 56 correct ones. Validate ran on the 108 answered tickets and
+    found no syntax or catastrophic issue, so no revision ran and it changed no answer; it added 2
+    destructive warnings and 1 unknown-command note. Its value on this benchmark is unmeasured
+    insurance, not accuracy. Agent cost $0.0129 per ticket (llm_only $0.0026), judged by LLM only.
