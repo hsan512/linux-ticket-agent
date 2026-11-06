@@ -73,6 +73,7 @@ def apply_rule(source: str, rule: str, run_id: str) -> None:
         for pred in latest_by_question(load_jsonl(src / "predictions.jsonl")).values():
             if pred["error"] is None and escalated(pred, rule):
                 pred = pred | {"status": "escalated",
+                               "escalation_kind": "not_confident",
                                "escalation_reason": escalation_reason(pred["draft"]["confidence"], insufficient(pred))}
             f.write(json.dumps(pred, ensure_ascii=False) + "\n")
     shutil.copy(src / "judgments.jsonl", dst / "judgments.jsonl")

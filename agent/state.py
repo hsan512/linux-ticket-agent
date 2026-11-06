@@ -12,6 +12,8 @@ from agent.tools.retrieval import Retriever
 from agent.tools.validate import Issue
 
 Status = Literal["answered", "needs_info", "escalated"]
+# why a ticket was handed off: the check failed, blocking issues were left, or the confidence/evidence rule fired
+EscalationKind = Literal["unchecked", "unsafe", "not_confident"]
 
 
 class TraceEntry(TypedDict, total=False):
@@ -51,7 +53,8 @@ class AgentState(TypedDict, total=False):
     grade_feedback: str  # what grade_evidence says is still missing
     evidence_sufficient: bool  # grade_evidence's latest verdict
     next_step: str  # routing decision written by grade_evidence
-    escalation_reason: str
+    escalation_reason: str  # internal detail for the human who takes the ticket
+    escalation_kind: EscalationKind  # the same decision as a fixed category, safe to show the asker
     draft: AgentDraft
     validation: list[Issue]  # problems the validate node found in the draft's commands
     validation_error: str | None  # set when the check itself failed: the draft is unchecked, not clean

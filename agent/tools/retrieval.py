@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import re
+
 from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore
@@ -11,7 +13,7 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
 from agent.config import DOCS_COLLECTION, EMBED_MODEL, HISTORY_COLLECTION, QDRANT_URL
-from agent.schemas import Evidence
+from agent.schemas import AgentDraft, Evidence
 
 MAX_HISTORY_ANSWER_CHARS = 2000
 
@@ -48,6 +50,13 @@ def _history_evidence(hit: NodeWithScore, idx: int) -> Evidence:
 def format_context(evidence: list[Evidence]) -> str:
     """Passages as the LLM sees them: "[D1] title" then the text."""
     return "\n\n".join(f"[{e.id}] {e.title}\n{e.text}" for e in evidence)
+
+
+def cited_evidence(draft: AgentDraft, evidence: list[Evidence]) -> list[Evidence]:
+    """The passages a draft relies on, in retrieval order: IDs in its citations list or written
+    inline in the answer (e.g. "(D4)"), the same rule as eval/judge.py's cited_ids."""
+    cited = set(draft.citations) | set(re.findall(r"\b[DHP]\d+\b", draft.answer))
+    return [e for e in evidence if e.id in cited]
 
 
 class Retriever:

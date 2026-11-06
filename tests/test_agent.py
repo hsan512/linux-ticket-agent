@@ -16,7 +16,8 @@ from agent.schemas import AgentDraft, Classification, Evidence, EvidenceGrade, P
 from agent.state import AgentContext
 from agent.tools.packages import CommandPackageLookup
 from agent.tools.validate import Issue
-from eval.run_agent import summarize, to_record
+from agent.trace import summarize
+from eval.run_agent import to_record
 
 
 def ev(source: str, url: str, text: str = "t") -> Evidence:
@@ -176,6 +177,7 @@ def test_route_after_draft(rule: str, confidence: str, sufficient: bool | None, 
 def test_escalate_node_keeps_draft_and_sets_status() -> None:
     out = escalate(_draft_state("low", False))
     assert out["status"] == "escalated" and "confidence=low" in out["escalation_reason"]
+    assert out["escalation_kind"] == "not_confident"
     assert "draft" not in out  # the draft stays in state for the human
 
 
@@ -382,6 +384,7 @@ def test_graph_escalates_when_revisions_run_out(monkeypatch: pytest.MonkeyPatch)
     assert out["status"] == "escalated" and out["revise_attempts"] == 2
     assert _nodes(out) == ["validate", "revise", "validate", "revise", "validate", "escalate"]
     reason = out["escalation_reason"]
+    assert out["escalation_kind"] == "unsafe"
     assert "after 2 revisions" in reason and "`rm -rf /` (catastrophic)" in reason
     assert "confidence" not in reason                                   # not the rule's reason
 
@@ -414,13 +417,14 @@ def test_graph_failed_check_escalates_with_its_reason(monkeypatch: pytest.Monkey
     out = _run(monkeypatch, VALIDATE, ["ls"])
     assert out["status"] == "escalated" and _nodes(out) == ["validate", "escalate"]
     assert "could not run" in out["escalation_reason"] and "TimeoutError" in out["escalation_reason"]
+    assert out["escalation_kind"] == "unchecked"
 
 
 def test_graph_rule_is_checked_before_validate(monkeypatch: pytest.MonkeyPatch) -> None:
     features = Features(validate_revise=True, escalation_rule="confidence_low")
     out = _run(monkeypatch, features, ["rm -rf /"], confidence="low")
     assert out["status"] == "escalated" and _nodes(out) == ["escalate"]
-    assert "confidence=low" in out["escalation_reason"]
+    assert "confidence=low" in out["escalation_reason"] and out["escalation_kind"] == "not_confident"
 
 
 def test_graph_longest_path_fits_max_steps(monkeypatch: pytest.MonkeyPatch) -> None:
