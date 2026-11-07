@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.main
+from api.budget import DailyBudget
 from api.handoff import save_handoff
 from eval.common import load_jsonl
 
@@ -50,6 +51,7 @@ def queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def client(queue: Path) -> TestClient:
     # no `with`: the lifespan does not run, so the real graph is never built
     api.main.limiter.reset()  # every test request comes from the same address
+    app.state.daily_budget = DailyBudget(limit_usd=1.0)  # set by the lifespan, which tests skip
     return TestClient(app)
 
 
@@ -195,3 +197,23 @@ def test_sixth_ticket_in_a_minute_is_refused_before_the_agent_runs(client: TestC
     codes = [client.post("/tickets", json={"title": "t", "question_text": "q"}).status_code for _ in range(6)]
     assert codes == [200] * 5 + [429] and len(graph.inputs) == 5                      # no LLM spend on the 6th
     assert client.get("/health").status_code == 200                                    # health is not limited
+
+
+def test_spent_budget_refuses_tickets_without_running_the_agent(client: TestClient) -> None:
+    app.state.daily_budget.add(1.0)
+    response, graph = _post_raw(client, "t", "q")
+    assert response.status_code == 503 and "budget" in response.json()["detail"]   # not turned into a 500
+    assert graph.inputs == []
+
+
+def test_each_ticket_cost_is_added_to_the_budget(client: TestClient) -> None:
+    app.state.daily_budget = DailyBudget(limit_usd=0.002)
+    assert _post_raw(client, "t", "q")[0].status_code == 200                        # spends $0.0012
+    assert _post_raw(client, "t", "q")[0].status_code == 200                        # $0.0024 after this one
+    assert _post_raw(client, "t", "q")[0].status_code == 503
+
+
+def test_too_long_question_needs_no_budget(client: TestClient) -> None:
+    app.state.daily_budget.add(1.0)                                                 # the agent would not run anyway
+    response, _ = _post_raw(client, "t", "x" * (api.main.MAX_QUESTION_CHARS + 1))
+    assert response.json()["escalation_reason"] == PUBLIC_REASON["too_long"]

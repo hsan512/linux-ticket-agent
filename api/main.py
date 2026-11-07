@@ -27,13 +27,14 @@ from agent.state import AgentContext, AgentState, EscalationKind, Status
 from agent.tools.packages import CommandPackageLookup, load_command_packages
 from agent.tools.retrieval import Retriever, cited_evidence
 from agent.trace import summarize
+from api.budget import DailyBudget
 from api.handoff import base_record, handoff_record, save_handoff
-
-logger = logging.getLogger(__name__)
 
 # One line per ticket, keyed by ticket_id. Never the ticket text: it is user data, and the hand-off
 # queue already keeps it for escalated tickets.
 logger = logging.getLogger(__name__)
+
+DAILY_BUDGET = 1.0  # USD; the agent's cost is about $0.013 per ticket, so this allows ~75 tickets/day
 
 # the benchmark's limit (eval/make_benchmark.py): longer tickets were never measured
 MAX_QUESTION_CHARS = 4000
@@ -98,6 +99,7 @@ async def lifespan_context(app: FastAPI) -> AsyncIterator[None]:
     command_lookup = CommandPackageLookup(command_packages)
     app.state.context = AgentContext(retriever=Retriever(), command_lookup=command_lookup)
     app.state.graph = build_graph(FEATURES)
+    app.state.daily_budget = DailyBudget(limit_usd=DAILY_BUDGET)
     logger.info("ready: %s", FEATURES.version)
     yield
 
@@ -134,6 +136,8 @@ def create_ticket(body: TicketRequest, request: Request) -> TicketResponse:
     ticket_id = uuid.uuid4().hex
     try:
         return handle_ticket(ticket_id, body, request.app.state)
+    except HTTPException:
+        raise  # deliberate answers such as 503, not failures
     except Exception:
         logger.exception("ticket %s: failed", ticket_id)  # with the stack trace
         raise HTTPException(status_code=500, detail=f"Internal error. Reference: {ticket_id}") from None
@@ -155,8 +159,13 @@ def handle_ticket(ticket_id: str, body: TicketRequest, app_state: State) -> Tick
             escalation_reason=PUBLIC_REASON["too_long"],
         )
     start = time.perf_counter()
+    if app_state.daily_budget.exhausted():
+        logger.warning("ticket %s: daily budget reached", ticket_id)
+        raise HTTPException(status_code=503, detail="Daily budget reached; try again tomorrow (UTC).")
     state = run_ticket(app_state.graph, ticket, app_state.context)
-    log_ticket(ticket_id, state, time.perf_counter() - start)
+    wall_s = time.perf_counter() - start
+    log_ticket(ticket_id, state, wall_s)
+    app_state.daily_budget.add(summarize(state, wall_s)["cost_usd"])
     if state["status"] == "escalated":
         save_handoff(handoff_record(ticket_id, ticket, state, FEATURES.version))
         return TicketResponse(
