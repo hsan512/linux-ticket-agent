@@ -1,0 +1,138 @@
+{
+  "run_id": "agent-v4-test",
+  "config": {
+    "system": "agent_v4_validate_confidence_not_high",
+    "features": {
+      "grade_evidence": true,
+      "escalation_rule": "confidence_not_high",
+      "validate_revise": true
+    },
+    "generator": "gpt-5.4-mini",
+    "embed": "text-embedding-3-small",
+    "docs_k": 5,
+    "history_k": 3,
+    "max_steps": 16,
+    "command_packages": {
+      "noble": 49682
+    },
+    "context": {
+      "max_tool_calls": 6,
+      "tool_retries": 2,
+      "max_retrievals": 2,
+      "max_revise_attempts": 2
+    },
+    "prompts": {
+      "CLASSIFY": "You triage Linux/Unix support tickets. Classify the ticket.\n- issue_type: the main area of the problem.\n- risk_level: how much damage a wrong fix could do on the asker's system.\n- missing_info: only facts without which no reasonable answer is possible. Most tickets are answerable as written; leave it empty unless something essential is truly absent.",
+      "RETRIEVE": "You plan research for a Linux/Unix support ticket. Available tools:\n- SearchDocs: man pages and GNU manuals (exact command/option/config behaviour)\n- SearchSimilar: past solved Stack Exchange questions\n- CheckCommand: which Ubuntu packages provide a command, one command name per call. Use it for commands you might recommend but are not sure exist, or that the asker may need to install.\nCall the tools that would help answer the ticket correctly, with focused queries. You may call several, or none if the answer is basic and certain without looking anything up.",
+      "GRADE": "You check retrieved passages before a Linux/Unix support ticket is answered.\nFor each passage, decide if it is relevant: it directly helps solve this specific ticket (the exact command, option, or config involved, or a past question with the same problem). Passages that are only on the same general topic are NOT relevant.\nPackage lookups (P1, P2, ...) state which Ubuntu packages provide a command, or that it was not found. Mark one relevant if that command is likely to appear in the answer, even though it does not explain how to solve the problem.\nThen decide if the relevant passages are sufficient to answer the ticket reliably. Package lookups alone are never sufficient. If not sufficient, say briefly what is missing.",
+      "REWRITE": "Earlier searches for this Linux/Unix support ticket did not find enough useful information. Plan new searches that target what is missing. Do not repeat earlier queries; use different terms, the specific command or config file involved, or the likely underlying cause.\n- SearchDocs: man pages and GNU manuals\n- SearchSimilar: past solved Stack Exchange questions\n- CheckCommand: which Ubuntu packages provide a command, one command name per call",
+      "DRAFT": "You are a Linux/Unix support engineer answering a user's ticket.\nYou may be given context passages: documentation excerpts (D1, D2, ...), past solved questions with their accepted answers (H1, H2, ...), and Ubuntu package lookups (P1, P2, ...).\n- Passages were retrieved automatically and may be irrelevant. Use only those that actually address the ticket, and cite the IDs you relied on. Ignore the rest.\n- If no passage helps, answer from your own knowledge with empty citations.\n- Prefer precise, minimal commands. Never invent commands or options.\n- If a package lookup lists a command you use, tell the asker which package to install if it may be missing, and cite the lookup. If a lookup says a command was not found, do not rely on it unless you are sure it exists (e.g. a shell builtin); prefer an alternative that was found.\n- List every shell command you propose in `commands`, exactly as it should be run.\n- Set confidence honestly.",
+      "REVISE": "You are a Linux/Unix support engineer fixing your own answer to a user's ticket. An automatic check of the answer's shell commands found the problems listed below. Return the whole corrected answer in the same format.\n- Fix every listed problem. Change nothing else: keep the other steps, commands, and wording.\n- syntax: correct the command so that `bash -n` accepts it.\n- catastrophic: the command could destroy the system or the asker's data, often because a variable that comes out empty turns a path into `/`. Make it safe, e.g. `${VAR:?}` instead of `$VAR`, an explicit path, or a narrower target. If it cannot be made safe, remove it and tell the asker what to do by hand instead.\n- `commands` must list every command in the answer, exactly as it should be run.\n- Keep the citations unchanged, unless a cited step was removed.\n- Do not invent paths or names: use UPPERCASE placeholders (e.g. UPLOADS_DIR) for what the ticket does not say, and lower confidence if a fix is a guess."
+    },
+    "split": "test",
+    "workers": 4
+  },
+  "tickets_in_split": 160,
+  "tickets_answered": 160,
+  "generation_errors": 0,
+  "tickets_judged": 160,
+  "accuracy": 0.35,
+  "accuracy_ci95": [
+    0.28039680852544535,
+    0.42663730246956433
+  ],
+  "mean_score": 3.25625,
+  "score_hist": {
+    "1": 2,
+    "2": 38,
+    "3": 64,
+    "4": 29,
+    "5": 27
+  },
+  "faithfulness": {
+    "partially_supported": 133,
+    "supported": 10,
+    "unsupported": 5,
+    "no_citations": 12
+  },
+  "selective": {
+    "coverage": 0.675,
+    "accuracy_on_answered": 0.46296296296296297,
+    "accuracy_on_answered_ci95": [
+      0.3718141084236022,
+      0.5566561566655953
+    ],
+    "wrong_answers_shown": 58,
+    "correct_answers_escalated": 6
+  },
+  "commands": {
+    "answers_with_commands": 86,
+    "commands_total": 244,
+    "syntax_error_rate": 0.09016393442622951,
+    "unknown_command_rate": 0.01639344262295082,
+    "answers_with_invalid_command_rate": 0.09302325581395349,
+    "unknown_names_top": [
+      [
+        "nixos-option",
+        2
+      ],
+      [
+        "2048*512",
+        1
+      ],
+      [
+        "{}",
+        1
+      ]
+    ]
+  },
+  "citations": {
+    "answers_with_citations_rate": 0.925,
+    "dangling_citation_rate": 0.0,
+    "cited_sources": {
+      "D": 269,
+      "H": 116,
+      "P": 10
+    }
+  },
+  "latency_s": {
+    "total": {
+      "mean": 8.233274837818778,
+      "p50": 7.214966848000131,
+      "p95": 12.620222172000467,
+      "max": 13.716490900999815
+    },
+    "stage_p50": {
+      "classify": 0.953167810499508,
+      "draft": 2.7385795810000673,
+      "escalate": 0.0,
+      "finalize": 0.0,
+      "grade_evidence": 1.4594239184993967,
+      "retrieve": 1.7811500170005274,
+      "rewrite_query": 0.0,
+      "validate": 6.262200031414977e-05
+    }
+  },
+  "tokens_per_ticket": {
+    "input": 12470.7625,
+    "output": 790.08125
+  },
+  "llm_calls_per_ticket": {
+    "mean": 4.7,
+    "p50": 4.0,
+    "p95": 6,
+    "max": 6
+  },
+  "cost_usd": {
+    "per_ticket": {
+      "mean": 0.012909895875,
+      "p50": 0.01178738,
+      "p95": 0.02437213,
+      "max": 0.03385177
+    },
+    "per_correct": 0.03688541678571428,
+    "generation_total": 2.06558334,
+    "judge_total": 1.332308
+  },
+  "spot_check": null
+}
