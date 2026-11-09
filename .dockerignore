@@ -1,0 +1,20 @@
+# Keep the build context small and free of secrets and user data. The Dockerfile copies only what
+# the API needs (agent/, api/, the package table); this list stops the rest even reaching the build.
+
+# secrets
+.env
+
+# real tickets sent to the API
+data/handoff/
+
+# large data: Qdrant has its own volume; the raw dump and evaluation runs are not needed to serve
+data/raw/
+data/qdrant_storage/
+eval/runs/
+
+# local clutter
+.git/
+.vscode/
+.pytest_cache/
+**/__pycache__/
+**/*.pyc

@@ -6,3 +6,17 @@ services:
     volumes:
       - ./data/qdrant_storage:/qdrant/storage
     restart: unless-stopped
+
+  api:
+    build: .  # the repository root
+    ports:
+      - "127.0.0.1:8000:8000"  # localhost only until there is a proxy in front of it
+    environment:
+      QDRANT_URL: http://qdrant:6333  # the service name; "localhost" inside a container is the container
+      # read from the shell that runs compose, never stored in the image; fails fast if unset
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in the shell before docker compose up}
+    volumes:
+      - ./data/handoff:/app/data/handoff  # the hand-off queue outlives the container
+    depends_on:
+      - qdrant  # starts first; the API retries via restart if Qdrant is not ready yet
+    restart: unless-stopped
