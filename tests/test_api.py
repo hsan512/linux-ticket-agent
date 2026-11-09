@@ -76,7 +76,7 @@ def test_answered_ticket_returns_final_answer(client: TestClient) -> None:
 
 def test_answered_ticket_cites_only_what_the_answer_cites(client: TestClient) -> None:
     body, _ = _post(client, ANSWERED)
-    assert body["citations"] == [{"id": "D2", "title": "title D2", "url": "https://x/D2"}]
+    assert body["citations"] == [{"id": "D2", "title": "title D2", "url": "https://x/D2", "authors": [], "license": None}]
 
 
 def test_inline_citation_missing_from_the_list_still_counts(client: TestClient) -> None:
@@ -217,3 +217,12 @@ def test_too_long_question_needs_no_budget(client: TestClient) -> None:
     app.state.daily_budget.add(1.0)                                                 # the agent would not run anyway
     response, _ = _post_raw(client, "t", "x" * (api.main.MAX_QUESTION_CHARS + 1))
     assert response.json()["escalation_reason"] == PUBLIC_REASON["too_long"]
+
+
+def test_stack_exchange_citation_credits_authors_and_license(client: TestClient) -> None:
+    past = Evidence(id="H1", source="history", title="past question", url="https://unix.stackexchange.com/q/1",
+                    text="secret text", score=0.5, authors=["asker", "answerer"], license="CC BY-SA 4.0")
+    draft = DRAFT.model_copy(update={"answer": "As in [H1].", "citations": ["H1"]})
+    body, _ = _post(client, ANSWERED | {"draft": draft, "evidence": [past]})
+    assert body["citations"] == [{"id": "H1", "title": "past question", "url": "https://unix.stackexchange.com/q/1",
+                                  "authors": ["asker", "answerer"], "license": "CC BY-SA 4.0"}]   # CC BY-SA credit

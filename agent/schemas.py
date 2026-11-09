@@ -16,6 +16,8 @@ class Evidence(BaseModel):
     url: str
     text: str
     score: float
+    authors: list[str] = Field(default=[], description="People to credit: the question and answer authors for Stack Exchange passages; empty otherwise.")
+    license: str | None = Field(default=None, description="License of the passage, if known.")
 
 
 class DraftAnswer(BaseModel):

@@ -487,3 +487,18 @@ def test_graph_warning_reaches_the_asker_but_not_the_judge(monkeypatch: pytest.M
 def test_escalated_ticket_has_no_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     state = _run(monkeypatch, VALIDATE, ["rm -rf /"], ["rm -rf /"], ["rm -rf /"])
     assert to_record({"question_id": 1, "split": "dev"}, state, wall_s=1.0)["final_answer"] is None
+
+
+def _history_hit(question_author: str, answer_author: str) -> object:
+    from llama_index.core.schema import NodeWithScore, TextNode
+    metadata = {"title": "t", "url": "https://unix.stackexchange.com/q/1", "answer_text": "use ls",
+                "question_author": question_author, "answer_author": answer_author, "license": "CC BY-SA 3.0"}
+    return NodeWithScore(node=TextNode(text="q", metadata=metadata), score=0.7)
+
+
+def test_history_passage_credits_both_authors_once() -> None:
+    from agent.tools.retrieval import _history_evidence
+    e = _history_evidence(_history_hit("asker", "answerer"), 1)
+    assert (e.authors, e.license) == (["asker", "answerer"], "CC BY-SA 3.0")
+    assert "by answerer, CC BY-SA 3.0" in e.text                       # the LLM still sees the credit
+    assert _history_evidence(_history_hit("same", "same"), 1).authors == ["same"]   # self-answered question

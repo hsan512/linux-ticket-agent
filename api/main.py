@@ -64,6 +64,8 @@ class Citation(BaseModel):
     id: str = Field(description="Citation ID as written in the answer, e.g. D1 or H2.")
     title: str
     url: str = Field(description="The man page, manual, or original Stack Exchange post.")
+    authors: list[str] = Field(default=[], description="People to credit: the question and answer authors for Stack Exchange passages; empty otherwise.")
+    license: str | None = Field(default=None, description="License of the passage, if known.")
 
 
 class TicketResponse(BaseModel):
@@ -174,7 +176,7 @@ def handle_ticket(ticket_id: str, body: TicketRequest, app_state: State) -> Tick
             escalation_reason=PUBLIC_REASON[state["escalation_kind"]],
         )
     cited = cited_evidence(state["draft"], state.get("evidence", []))
-    citations = [Citation(id=e.id, title=e.title, url=e.url) for e in cited]
+    citations = [Citation.model_validate(e, from_attributes=True) for e in cited]  # convert Evidence -> Citation
     return TicketResponse(
         ticket_id=ticket_id,
         status="answered",

@@ -43,8 +43,10 @@ def _history_evidence(hit: NodeWithScore, idx: int) -> Evidence:
     text = (f"Past question: {hit.node.get_content()}\n\n"
             f"Accepted answer (by {md['answer_author']}, {md['license']}):\n"
             f"{md['answer_text'][:MAX_HISTORY_ANSWER_CHARS]}")
+    authors = list(dict.fromkeys([md["question_author"], md["answer_author"]]))  # remove duplicates
     return Evidence(id=f"H{idx}", source="history", title=md["title"], url=md["url"],
-                    text=text, score=hit.score or 0.0)
+                    text=text, score=hit.score or 0.0, authors=authors,
+                    license=md.get("license"))
 
 
 def format_context(evidence: list[Evidence]) -> str:
