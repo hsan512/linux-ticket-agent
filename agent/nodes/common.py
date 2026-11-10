@@ -7,7 +7,8 @@ from agent.state import TraceEntry
 
 
 def llm_trace(node: str, usage: Usage, **extra) -> TraceEntry:
-    """Trace entry for a node that made one LLM call; `extra` adds node-specific fields."""
+    """Trace entry for a node that made one LLM call; `extra` adds node-specific
+    fields."""
     return TraceEntry(
         node=node,
         model=usage.model,

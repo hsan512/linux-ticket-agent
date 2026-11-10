@@ -1,10 +1,11 @@
 """Single-call baselines, both using the same generator model as the agent:
 
 - rag:      retrieve (docs + similar past questions) once, then answer in one LLM call
-- llm_only: answer from the model's own knowledge, no retrieval (measures what retrieval adds)
+- llm_only: answer from the model's own knowledge, no retrieval (measures what retrieval
+  adds)
 
-Results are appended to eval/runs/<run_id>/predictions.jsonl, so an interrupted run resumes.
-Stops submitting new tickets once the run's spend reaches --budget-usd.
+Results are appended to eval/runs/<run_id>/predictions.jsonl, so an interrupted run
+resumes. Stops submitting new tickets once the run's spend reaches --budget-usd.
 """
 
 from __future__ import annotations
@@ -23,11 +24,11 @@ from eval.common import load_benchmark
 from eval.runner import add_run_args, prepare_run, run_jobs
 
 SYSTEM_PROMPT = """You are a Linux/Unix support engineer answering a user's ticket.
-You are given context passages: documentation excerpts (D1, D2, ...) and past solved questions \
-with their accepted answers (H1, H2, ...).
+You are given context passages: documentation excerpts (D1, D2, ...) and past solved \
+questions with their accepted answers (H1, H2, ...).
 - Use the passages when they are relevant and cite the IDs you relied on.
-- If the passages are not enough, you may use your own knowledge, but do not cite passages that \
-do not support a claim.
+- If the passages are not enough, you may use your own knowledge, but do not cite \
+passages that do not support a claim.
 - Prefer precise, minimal commands. Never invent commands or options.
 - List every shell command you propose in `commands`, exactly as it should be run."""
 
@@ -54,10 +55,15 @@ def answer_ticket(item: dict, retriever: Retriever | None) -> dict:
         messages = [SystemMessage(LLM_ONLY_PROMPT), HumanMessage(f"Ticket:\n{query}")]
     else:
         evidence = retriever.search_docs(query) + retriever.search_similar(query)
-        embed_cost = cost_usd(EMBED_MODEL, 2 * len(_enc.encode(query)))  # one query embedding per collection
+        embed_cost = cost_usd(
+            EMBED_MODEL, 2 * len(_enc.encode(query))
+        )  # one query embedding per collection
         messages = [
             SystemMessage(SYSTEM_PROMPT),
-            HumanMessage(f"Context passages:\n\n{format_context(evidence)}\n\n---\nTicket:\n{query}"),
+            HumanMessage(
+                f"Context "
+                f"passages:\n\n{format_context(evidence)}\n\n---\nTicket:\n{query}"
+            ),
         ]
     retrieval_s = time.perf_counter() - start
 
@@ -76,7 +82,11 @@ def answer_ticket(item: dict, retriever: Retriever | None) -> dict:
             "llm_calls": 1,
         },
         "cost_usd": result.cost_usd + embed_cost,
-        "latency_s": {"retrieval": retrieval_s, "llm": result.latency_s, "total": time.perf_counter() - start},
+        "latency_s": {
+            "retrieval": retrieval_s,
+            "llm": result.latency_s,
+            "total": time.perf_counter() - start,
+        },
         "error": None,
     }
 
@@ -87,15 +97,26 @@ def main() -> None:
     add_run_args(parser)
     args = parser.parse_args()
 
-    out_path = prepare_run(args, {
-        "system": args.system, "generator": GENERATOR_MODEL,
-        "embed": EMBED_MODEL if args.system == "rag" else None,
-        "docs_k": 5, "history_k": 3, "prompt": PROMPTS[args.system],
-    })
+    out_path = prepare_run(
+        args,
+        {
+            "system": args.system,
+            "generator": GENERATOR_MODEL,
+            "embed": EMBED_MODEL if args.system == "rag" else None,
+            "docs_k": 5,
+            "history_k": 3,
+            "prompt": PROMPTS[args.system],
+        },
+    )
     retriever = Retriever() if args.system == "rag" else None
     items = load_benchmark(PROCESSED_DIR / "benchmark.jsonl", args.split)
-    run_jobs(items[: args.limit] if args.limit else items, lambda item: answer_ticket(item, retriever),
-             out_path, args.budget_usd, args.workers)
+    run_jobs(
+        items[: args.limit] if args.limit else items,
+        lambda item: answer_ticket(item, retriever),
+        out_path,
+        args.budget_usd,
+        args.workers,
+    )
 
 
 if __name__ == "__main__":

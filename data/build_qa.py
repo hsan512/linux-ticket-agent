@@ -1,6 +1,7 @@
 """Filter the Unix & Linux dump into question/accepted-answer pairs (JSONL).
 
-Each record keeps the attribution CC BY-SA requires: post URL, author, and license version.
+Each record keeps the attribution CC BY-SA requires: post URL, author, and license
+version.
 """
 
 from __future__ import annotations
@@ -51,12 +52,18 @@ def author_of(row: dict[str, str], users: dict[str, str]) -> dict[str, str | Non
     name = users.get(user_id) if user_id else None
     return {
         "name": name or row.get("OwnerDisplayName") or "(unknown)",
-        "profile_url": f"{SITE_URL}/users/{user_id}" if user_id and user_id != "-1" else None,
+        "profile_url": f"{SITE_URL}/users/{user_id}"
+        if user_id and user_id != "-1"
+        else None,
     }
 
 
 def load_display_names(users_xml: Path, wanted: set[str]) -> dict[str, str]:
-    return {r["Id"]: r.get("DisplayName", "") for r in iter_rows(users_xml) if r["Id"] in wanted}
+    return {
+        r["Id"]: r.get("DisplayName", "")
+        for r in iter_rows(users_xml)
+        if r["Id"] in wanted
+    }
 
 
 def build_record(q: dict[str, str], a: dict[str, str], users: dict[str, str]) -> dict:
@@ -79,7 +86,8 @@ def build_record(q: dict[str, str], a: dict[str, str], users: dict[str, str]) ->
         "answer_text": html_to_text(a.get("Body", "")),
         "answer_author": author_of(a, users),
         "answer_license": a.get("ContentLicense"),
-        "self_answered": q.get("OwnerUserId") is not None and q.get("OwnerUserId") == a.get("OwnerUserId"),
+        "self_answered": q.get("OwnerUserId") is not None
+        and q.get("OwnerUserId") == a.get("OwnerUserId"),
     }
 
 
@@ -112,7 +120,9 @@ def main() -> None:
         if reason is None:
             pairs.append((questions[row["Id"]], row))
     stats["accepted_answer_missing"] = stats["question_kept"] - sum(
-        v for k, v in stats.items() if k.startswith("answer_rejected:") or k == "pair_kept"
+        v
+        for k, v in stats.items()
+        if k.startswith("answer_rejected:") or k == "pair_kept"
     )
 
     user_ids = {p.get("OwnerUserId") for pair in pairs for p in pair} - {None}

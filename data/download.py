@@ -34,7 +34,11 @@ def md5sum(path: Path, chunk_size: int = 1 << 20) -> str:
 
 
 def is_valid(path: Path) -> bool:
-    return path.exists() and path.stat().st_size == EXPECTED_SIZE and md5sum(path) == EXPECTED_MD5
+    return (
+        path.exists()
+        and path.stat().st_size == EXPECTED_SIZE
+        and md5sum(path) == EXPECTED_MD5
+    )
 
 
 def download(url: str, dest: Path, chunk_size: int = 1 << 20) -> None:
@@ -46,7 +50,11 @@ def download(url: str, dest: Path, chunk_size: int = 1 << 20) -> None:
             out.write(chunk)
             done += len(chunk)
             if total:
-                print(f"\r{done / 1e6:8.1f} / {total / 1e6:.1f} MB", end="", file=sys.stderr)
+                print(
+                    f"\r{done / 1e6:8.1f} / {total / 1e6:.1f} MB",
+                    end="",
+                    file=sys.stderr,
+                )
     print(file=sys.stderr)
     tmp.rename(dest)
 

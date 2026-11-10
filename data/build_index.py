@@ -26,7 +26,13 @@ from qdrant_client import QdrantClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.config import (  # noqa: E402
-    DOCS_COLLECTION, EMBED_MODEL, HISTORY_COLLECTION, HISTORY_CUTOFF, PROCESSED_DIR, QDRANT_URL, cost_usd,
+    DOCS_COLLECTION,
+    EMBED_MODEL,
+    HISTORY_COLLECTION,
+    HISTORY_CUTOFF,
+    PROCESSED_DIR,
+    QDRANT_URL,
+    cost_usd,
 )
 from agent.tools.retrieval import embed_model, vector_store  # noqa: E402
 
@@ -49,7 +55,9 @@ def docs_nodes(path: Path) -> list[TextNode]:
         for rec in map(json.loads, f):
             doc = Document(
                 text=rec["text"],
-                metadata={k: rec[k] for k in ("doc_id", "title", "url", "source", "package")},
+                metadata={
+                    k: rec[k] for k in ("doc_id", "title", "url", "source", "package")
+                },
                 excluded_embed_metadata_keys=hidden,
                 excluded_llm_metadata_keys=hidden,
             )
@@ -91,7 +99,9 @@ def existing_ids(client: QdrantClient, collection: str) -> set[str]:
     ids: set[str] = set()
     offset = None
     while True:
-        points, offset = client.scroll(collection, limit=10_000, offset=offset, with_payload=False)
+        points, offset = client.scroll(
+            collection, limit=10_000, offset=offset, with_payload=False
+        )
         ids.update(str(p.id) for p in points)
         if offset is None:
             return ids
@@ -99,19 +109,25 @@ def existing_ids(client: QdrantClient, collection: str) -> set[str]:
 
 def embed_tokens(nodes: list[TextNode]) -> int:
     enc = tiktoken.get_encoding("cl100k_base")  # tokenizer used by text-embedding-3-*
-    return sum(len(enc.encode(n.get_content(metadata_mode=MetadataMode.EMBED))) for n in nodes)
+    return sum(
+        len(enc.encode(n.get_content(metadata_mode=MetadataMode.EMBED))) for n in nodes
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--only", choices=[DOCS_COLLECTION, HISTORY_COLLECTION])
-    parser.add_argument("--yes", action="store_true", help="actually call the embeddings API")
+    parser.add_argument(
+        "--yes", action="store_true", help="actually call the embeddings API"
+    )
     args = parser.parse_args()
 
     client = QdrantClient(url=QDRANT_URL)
     corpora = {
         DOCS_COLLECTION: lambda: docs_nodes(PROCESSED_DIR / "docs.jsonl"),
-        HISTORY_COLLECTION: lambda: list(history_nodes(PROCESSED_DIR / "unix_qa.jsonl")),
+        HISTORY_COLLECTION: lambda: list(
+            history_nodes(PROCESSED_DIR / "unix_qa.jsonl")
+        ),
     }
     total_cost = 0.0
     todo: dict[str, list[TextNode]] = {}
@@ -125,8 +141,10 @@ def main() -> None:
         cost = cost_usd(EMBED_MODEL, tokens)
         total_cost += cost
         todo[name] = pending
-        print(f"{name}: {len(nodes)} nodes, {len(done)} already indexed, "
-              f"{len(pending)} to embed = {tokens:,} tokens = ${cost:.2f}")
+        print(
+            f"{name}: {len(nodes)} nodes, {len(done)} already indexed, "
+            f"{len(pending)} to embed = {tokens:,} tokens = ${cost:.2f}"
+        )
     print(f"Estimated embedding cost: ${total_cost:.2f} ({EMBED_MODEL})")
     if not args.yes:
         print("Dry run. Re-run with --yes to embed and upload.")
@@ -136,9 +154,15 @@ def main() -> None:
         if not pending:
             continue
         storage = StorageContext.from_defaults(vector_store=vector_store(client, name))
-        # Embeds every node via the OpenAI embeddings API in batches, then upserts to Qdrant.
-        VectorStoreIndex(pending, storage_context=storage, embed_model=embed_model(),
-                         insert_batch_size=1000, show_progress=True)
+        # Embeds every node via the OpenAI embeddings API in batches, then upserts to
+        # Qdrant.
+        VectorStoreIndex(
+            pending,
+            storage_context=storage,
+            embed_model=embed_model(),
+            insert_batch_size=1000,
+            show_progress=True,
+        )
         print(f"{name}: collection now has {client.count(name).count} points")
 
 

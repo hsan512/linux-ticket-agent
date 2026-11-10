@@ -14,7 +14,8 @@ from agent.state import AgentState
 
 def classify(state: AgentState) -> dict:
     result = invoke_structured(
-        GENERATOR_MODEL, Classification,
+        GENERATOR_MODEL,
+        Classification,
         [SystemMessage(prompts.CLASSIFY), HumanMessage(f"Ticket:\n{state['ticket']}")],
     )
     return {"classification": result.parsed, "trace": [llm_trace("classify", result)]}

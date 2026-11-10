@@ -8,14 +8,29 @@ from collections.abc import Iterator
 from html.parser import HTMLParser
 from pathlib import Path
 
-# Fabricated rows ("watermark v1") use fixed IDs >= 1_000_000_000; real U&L IDs are far below.
+# Fabricated rows ("watermark v1") use fixed IDs >= 1_000_000_000; real U&L IDs are far
+# below.
 # https://github.com/LunarWatcher/se-data-dump-transformer/blob/master/docs/meta/Known%20watermarks.md
 WATERMARK_MIN_ID = 1_000_000_000
 
 QUESTION = "1"
 ANSWER = "2"
 
-_BLOCK_TAGS = {"p", "pre", "div", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "hr"}
+_BLOCK_TAGS = {
+    "p",
+    "pre",
+    "div",
+    "li",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "tr",
+    "hr",
+}
 
 
 def iter_rows(path: Path) -> Iterator[dict[str, str]]:

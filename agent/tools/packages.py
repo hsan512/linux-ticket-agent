@@ -1,8 +1,9 @@
-"""Which Ubuntu packages ship a command, from the Contents indexes of the supported releases.
+"""Which Ubuntu packages ship a command, from the Contents indexes of the supported
+releases.
 
-data/build_packages.py builds the release -> command -> packages table once (offline); at run
-time the table backs the check_command tool (CommandPackageLookup.lookup_command) and the
-validate node's unknown-command check (CommandPackageLookup.packages).
+data/build_packages.py builds the release -> command -> packages table once (offline);
+at run time the table backs the check_command tool (CommandPackageLookup.lookup_command)
+and the validate node's unknown-command check (CommandPackageLookup.packages).
 """
 
 from __future__ import annotations
@@ -19,8 +20,10 @@ from agent.schemas import Evidence
 BIN_DIRS = frozenset({"usr/bin", "usr/sbin", "bin", "sbin"})
 RELEASE_NAMES = {"noble": "Ubuntu 24.04", "jammy": "Ubuntu 22.04"}  # newest first
 PACKAGE_URL = "https://packages.ubuntu.com/{release}/{package}"
-CONTENTS_SEARCH_URL = ("https://packages.ubuntu.com/search?searchon=contents&keywords={command}"
-                       "&mode=exactfilename&suite={release}&arch=any")
+CONTENTS_SEARCH_URL = (
+    "https://packages.ubuntu.com/search?searchon=contents&keywords={command}"
+    "&mode=exactfilename&suite={release}&arch=any"
+)
 
 
 def parse_contents_line(line: str) -> tuple[str, list[str]] | None:
@@ -33,7 +36,7 @@ def parse_contents_line(line: str) -> tuple[str, list[str]] | None:
     directly inside usr/bin, usr/sbin, bin, or sbin, or if it is a hidden file
     (name starts with "."); in those cases it is not a command.
 
-    >>> parse_contents_line("usr/bin/VBoxClient\\t\\tmultiverse/x11/a,multiverse/x11/b\\n")
+    >>> parse_contents_line("usr/bin/VBoxClient\\t\\tmultiverse/x11/a,x11/b\\n")
     ('VBoxClient', ['a', 'b'])
     """
     parts = line.split()
@@ -68,7 +71,8 @@ def build_command_packages(contents_path: Path) -> dict[str, list[str]]:
 
 
 def load_command_packages(path: Path) -> dict[str, dict[str, list[str]]]:
-    """Load a release -> command -> packages mapping written by data/build_packages.py."""
+    """Load a release -> command -> packages mapping written by
+    data/build_packages.py."""
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -105,8 +109,8 @@ def release_label(codename: str) -> str:
 
 
 class CommandPackageLookup:
-    """The check_command tool: holds the release -> command -> packages table and answers
-    one command per call as a single Evidence passage (found or not found)."""
+    """The check_command tool: holds the release -> command -> packages table and
+    answers one command per call as a single Evidence passage (found or not found)."""
 
     def __init__(self, command_packages: dict[str, dict[str, list[str]]]) -> None:
         if not command_packages:
@@ -117,11 +121,13 @@ class CommandPackageLookup:
         self._releases = known + sorted(set(command_packages) - set(RELEASE_NAMES))
 
     def packages(self, command: str) -> dict[str, list[str]]:
-        """Packages per release, {} if not found anywhere (see lookup_command_packages)."""
+        """Packages per release, {} if not found anywhere (see
+        lookup_command_packages)."""
         return lookup_command_packages(command, self._command_packages)
 
     def lookup_command(self, command: str) -> list[Evidence]:
-        """Look up one command; always returns exactly one Evidence (id is renumbered later)."""
+        """Look up one command; always returns exactly one Evidence (id is renumbered
+        later)."""
         found = lookup_command_packages(command, self._command_packages)
         present = [r for r in self._releases if r in found]
         missing = [r for r in self._releases if r not in found]
@@ -129,13 +135,29 @@ class CommandPackageLookup:
             lines = [f"{command} is provided by these packages (install any one):"]
             lines += [f"- {release_label(r)}: {', '.join(found[r])}" for r in present]
             if missing:
-                lines.append(f"Not found in: {', '.join(release_label(r) for r in missing)}.")
+                lines.append(
+                    f"Not found in: {', '.join(release_label(r) for r in missing)}."
+                )
             url = PACKAGE_URL.format(release=present[0], package=found[present[0]][0])
         else:
-            lines = [f"{command}: not found in the {', '.join(release_label(r) for r in missing)} "
-                     "package index. This does not prove it does not exist: it may be a shell builtin, "
-                     "a name set up at install time, or software from outside Ubuntu's archive."]
-            url = CONTENTS_SEARCH_URL.format(command=quote(command, safe=""), release=missing[0])
-        return [Evidence(id="P1", source="package", title=f"{command} (Ubuntu package index)", url=url,
-                         text="\n".join(lines),
-                         score=1.0 if present else 0.0)]  # not a similarity: 1.0 found, 0.0 not found
+            lines = [
+                f"{command}: not found in the "
+                f"{', '.join(release_label(r) for r in missing)} "
+                "package index. This does not prove it does not exist: it may be a "
+                "shell builtin, "
+                "a name set up at install time, or software from outside Ubuntu's "
+                "archive."
+            ]
+            url = CONTENTS_SEARCH_URL.format(
+                command=quote(command, safe=""), release=missing[0]
+            )
+        return [
+            Evidence(
+                id="P1",
+                source="package",
+                title=f"{command} (Ubuntu package index)",
+                url=url,
+                text="\n".join(lines),
+                score=1.0 if present else 0.0,
+            )
+        ]  # not a similarity: 1.0 found, 0.0 not found

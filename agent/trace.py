@@ -1,4 +1,5 @@
-"""Summaries of a ticket's trace, shared by the evaluation runs and the API's log lines."""
+"""Summaries of a ticket's trace, shared by the evaluation runs and the API's log
+lines."""
 
 from __future__ import annotations
 
@@ -9,8 +10,9 @@ from agent.state import AgentState
 
 
 def summarize(state: AgentState, wall_s: float) -> dict:
-    """Aggregate the trace into usage, cost, and per-node wall latency. Tool entries are skipped for
-    latency because tools run concurrently; their batch wall time is in `tools_wall_s`."""
+    """Aggregate the trace into usage, cost, and per-node wall latency. Tool entries are
+    skipped for latency because tools run concurrently; their batch wall time is in
+    `tools_wall_s`."""
     trace = state["trace"]
     llm = [t for t in trace if "model" in t]
     latency: dict[str, float] = defaultdict(float)

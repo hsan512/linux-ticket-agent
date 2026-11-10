@@ -20,7 +20,8 @@ def load_benchmark(path: Path, split: str) -> list[dict]:
 
 
 def latest_by_question(records: list[dict]) -> dict[int, dict]:
-    """Keep the last record per question (a resumed run may retry a ticket that errored)."""
+    """Keep the last record per question (a resumed run may retry a ticket that
+    errored)."""
     return {r["question_id"]: r for r in records}
 
 

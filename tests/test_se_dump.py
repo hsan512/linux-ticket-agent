@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from build_qa import FilterConfig, answer_reject_reason, author_of, question_reject_reason
+from build_qa import (
+    FilterConfig,
+    answer_reject_reason,
+    author_of,
+    question_reject_reason,
+)
 from se_dump import html_to_text, is_watermark, iter_rows, parse_tags
 
 CFG = FilterConfig()
@@ -19,7 +24,10 @@ def test_parse_tags_both_formats() -> None:
 
 
 def test_html_to_text_keeps_code_and_breaks() -> None:
-    html = "<p>Run this:</p><pre><code>ls -la &amp;&amp; echo ok\n</code></pre><ul><li>one</li><li>two</li></ul>"
+    html = (
+        "<p>Run this:</p><pre><code>ls -la &amp;&amp; echo ok\n</code></pre>"
+        "<ul><li>one</li><li>two</li></ul>"
+    )
     text = html_to_text(html)
     assert "ls -la && echo ok" in text
     assert "Run this:" in text
@@ -60,7 +68,10 @@ def test_author_attribution() -> None:
 
 def test_iter_rows_streams_attributes(tmp_path: Path) -> None:
     xml = tmp_path / "Posts.xml"
-    xml.write_text('<?xml version="1.0"?><posts><row Id="1" Body="&lt;p&gt;hi&lt;/p&gt;" /><row Id="2" /></posts>')
+    xml.write_text(
+        '<?xml version="1.0"?><posts><row Id="1" Body="&lt;p&gt;hi&lt;/p&gt;" /><row '
+        'Id="2" /></posts>'
+    )
     rows = list(iter_rows(xml))
     assert [r["Id"] for r in rows] == ["1", "2"]
     assert rows[0]["Body"] == "<p>hi</p>"

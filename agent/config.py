@@ -1,4 +1,5 @@
-"""Shared settings: model names, prices, and paths. Secrets come from the environment only."""
+"""Shared settings: model names, prices, and paths. Secrets come from the environment
+only."""
 
 from __future__ import annotations
 
@@ -10,7 +11,9 @@ PROCESSED_DIR = ROOT / "data" / "processed"
 RUNS_DIR = ROOT / "eval" / "runs"
 BENCHMARK_DIR = ROOT / "eval" / "benchmark"
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")  # docker compose up -d
+QDRANT_URL = os.environ.get(
+    "QDRANT_URL", "http://localhost:6333"
+)  # docker compose up -d
 
 GENERATOR_MODEL = "gpt-5.4-mini"
 JUDGE_MODEL = "gpt-6-sol"
@@ -20,8 +23,8 @@ DOCS_COLLECTION = "docs"
 HISTORY_COLLECTION = "history"
 PACKAGE_COLLECTION = "package"
 
-# Questions created before this date form the "similar issues" corpus; the benchmark is drawn
-# from questions on or after it, so no benchmark answer can leak into retrieval.
+# Questions created before this date form the "similar issues" corpus; the benchmark is
+# drawn from questions on or after it, so no benchmark answer can leak into retrieval.
 HISTORY_CUTOFF = "2023-01-01"
 
 # USD per 1M tokens (input, output), from https://developers.openai.com/api/docs/pricing

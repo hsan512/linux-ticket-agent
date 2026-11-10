@@ -1,7 +1,7 @@
 """Build the documentation corpus (man pages + GNU manuals) as JSONL, fully offline.
 
-Man pages are chosen from command names and tags in the *history* split only (questions before
-HISTORY_CUTOFF), so the benchmark never influences what is in the corpus.
+Man pages are chosen from command names and tags in the *history* split only (questions
+before HISTORY_CUTOFF), so the benchmark never influences what is in the corpus.
 """
 
 from __future__ import annotations
@@ -26,11 +26,16 @@ from agent.config import HISTORY_CUTOFF, PROCESSED_DIR  # noqa: E402
 from agent.tools.command_check import collect_known_commands, command_names  # noqa: E402
 
 MAN_SECTIONS = "1,8,5,7"
-MAN_SELECTION = Path(__file__).parent / "man_pages.json"  # frozen list of man doc_ids in the corpus
+MAN_SELECTION = (
+    Path(__file__).parent / "man_pages.json"
+)  # frozen list of man doc_ids in the corpus
 MIN_DOC_FREQ = 5  # a name must appear in at least this many history posts
 SYSTEM_INFO_DIR = Path("/usr/share/info")
-# bash-doc and gawk-doc .debs fetched with `apt-get download` and unpacked with `dpkg-deb -x`
-EXTRA_INFO_DIR = Path(__file__).parent / "raw" / "gnu" / "extracted" / "usr" / "share" / "info"
+# bash-doc and gawk-doc .debs fetched with `apt-get download` and unpacked with
+# `dpkg-deb -x`
+EXTRA_INFO_DIR = (
+    Path(__file__).parent / "raw" / "gnu" / "extracted" / "usr" / "share" / "info"
+)
 # info file stem -> (directory, GNU project slug for URLs, Debian package for licensing)
 INFO_MANUALS = {
     "bash": (EXTRA_INFO_DIR, "bash", "bash-doc"),
@@ -52,8 +57,10 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 # ---------- man pages ----------
 
+
 def answer_commands(rec: dict) -> set[str]:
-    """Names used in command position in the code blocks of a record's accepted answer."""
+    """Names used in command position in the code blocks of a record's accepted
+    answer."""
     names: set[str] = set()
     for block in _CODE.findall(rec["answer_html"]):
         for line in html.unescape(block).splitlines():
@@ -73,15 +80,30 @@ def document_frequencies(history: Iterable[dict]) -> tuple[Counter[str], Counter
 
 
 def man_paths(name: str) -> list[str]:
-    out = subprocess.run(["man", "-aw", "-s", MAN_SECTIONS, name], text=True, capture_output=True,
-                         env={**os.environ, "LANG": "C"}).stdout
+    out = subprocess.run(
+        ["man", "-aw", "-s", MAN_SECTIONS, name],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "LANG": "C"},
+    ).stdout
     return [p for p in out.split() if "/man/man" in p]  # English pages only
 
 
 def render_man(path: str) -> str:
-    env = {**os.environ, "MANWIDTH": "100", "GROFF_NO_SGR": "1", "LANG": "C.UTF-8", "MANPAGER": "cat"}
-    out = subprocess.run(["man", "--no-hyphenation", "--no-justification", "-l", path],
-                         text=True, capture_output=True, env=env, timeout=60).stdout
+    env = {
+        **os.environ,
+        "MANWIDTH": "100",
+        "GROFF_NO_SGR": "1",
+        "LANG": "C.UTF-8",
+        "MANPAGER": "cat",
+    }
+    out = subprocess.run(
+        ["man", "--no-hyphenation", "--no-justification", "-l", path],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=60,
+    ).stdout
     return _ANSI.sub("", re.sub(r".\x08", "", out)).strip()
 
 
@@ -125,15 +147,23 @@ def man_docs(names: list[str]) -> Iterator[dict]:
 
 # ---------- GNU manuals ----------
 
+
 def texinfo_html_name(node: str) -> str:
-    """Texinfo's HTML cross-reference node-name expansion (letters/digits kept, space -> '-')."""
+    """Texinfo's HTML cross-reference node-name expansion (letters/digits kept, space ->
+    '-')."""
     node = " ".join(node.split())
-    return "".join(c if c.isascii() and c.isalnum() else "-" if c == " " else f"_{ord(c):04x}" for c in node)
+    return "".join(
+        c if c.isascii() and c.isalnum() else "-" if c == " " else f"_{ord(c):04x}"
+        for c in node
+    )
 
 
 def info_nodes(directory: Path, stem: str) -> Iterator[tuple[str, str]]:
     """(node name, text) pairs from a (possibly split) gzipped Info manual."""
-    parts = sorted(directory.glob(f"{stem}.info-*.gz"), key=lambda p: int(p.name.split("-")[-1][:-3]))
+    parts = sorted(
+        directory.glob(f"{stem}.info-*.gz"),
+        key=lambda p: int(p.name.split("-")[-1][:-3]),
+    )
     for part in parts or [directory / f"{stem}.info.gz"]:
         with gzip.open(part, "rt", encoding="utf-8", errors="replace") as f:
             for chunk in f.read().split("\x1f"):
@@ -146,9 +176,15 @@ def info_nodes(directory: Path, stem: str) -> Iterator[tuple[str, str]]:
 def info_docs() -> Iterator[dict]:
     for stem, (directory, project, package) in INFO_MANUALS.items():
         if not (directory / f"{stem}.info.gz").exists():
-            sys.exit(f"missing Info manual {directory / stem}.info.gz (see data/SOURCES.md)")
+            sys.exit(
+                f"missing Info manual {directory / stem}.info.gz (see data/SOURCES.md)"
+            )
         for node, text in info_nodes(directory, stem):
-            if len(text) < MIN_SECTION_CHARS or node.lower().endswith("index") or node == "Top":
+            if (
+                len(text) < MIN_SECTION_CHARS
+                or node.lower().endswith("index")
+                or node == "Top"
+            ):
                 continue
             yield {
                 "doc_id": f"gnu:{project}#{node}",
@@ -161,8 +197,9 @@ def info_docs() -> Iterator[dict]:
 
 
 def dedupe(docs: list[dict]) -> list[dict]:
-    """Drop docs whose text or doc_id repeats an earlier one (e.g. gcc-13 vs g++-13 man pages,
-    or the same page installed under two paths). doc_ids must be unique: they seed point IDs."""
+    """Drop docs whose text or doc_id repeats an earlier one (e.g. gcc-13 vs g++-13 man
+    pages, or the same page installed under two paths). doc_ids must be unique: they
+    seed point IDs."""
     seen: set[str] = set()
     kept = []
     for d in docs:
@@ -174,13 +211,17 @@ def dedupe(docs: list[dict]) -> list[dict]:
 
 
 def select_frozen(docs: list[dict], frozen: set[str]) -> list[dict]:
-    """Keep exactly the man pages listed in data/man_pages.json, so tweaks to the command parser
-    (which drives candidate selection) never silently change the corpus behind earlier runs."""
+    """Keep exactly the man pages listed in data/man_pages.json, so tweaks to the
+    command parser (which drives candidate selection) never silently change the corpus
+    behind earlier runs."""
     kept = [d for d in docs if d["doc_id"] in frozen]
     missing = frozen - {d["doc_id"] for d in kept}
     if missing:
-        sys.exit(f"{len(missing)} frozen man pages not produced (e.g. {sorted(missing)[:5]}); "
-                 "use --refresh-man-selection if the corpus is meant to change")
+        sys.exit(
+            f"{len(missing)} frozen man pages not produced (e.g. "
+            f"{sorted(missing)[:5]}); "
+            "use --refresh-man-selection if the corpus is meant to change"
+        )
     return kept
 
 
@@ -188,14 +229,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--qa", type=Path, default=PROCESSED_DIR / "unix_qa.jsonl")
     parser.add_argument("--out-dir", type=Path, default=PROCESSED_DIR)
-    parser.add_argument("--refresh-man-selection", action="store_true",
-                        help="re-derive data/man_pages.json (changes the corpus; re-run baselines after)")
+    parser.add_argument(
+        "--refresh-man-selection",
+        action="store_true",
+        help="re-derive data/man_pages.json (changes the corpus; re-run baselines "
+        "after)",
+    )
     args = parser.parse_args()
 
     with args.qa.open() as f:
         history = [r for r in map(json.loads, f) if r["created"] < HISTORY_CUTOFF]
     commands_df, df = document_frequencies(history)
-    names = sorted(n for n, c in df.items() if c >= MIN_DOC_FREQ and re.fullmatch(r"[\w.+-]+", n))
+    names = sorted(
+        n for n, c in df.items() if c >= MIN_DOC_FREQ and re.fullmatch(r"[\w.+-]+", n)
+    )
     print(f"{len(names)} candidate names from {len(history)} history posts")
 
     man = dedupe(list(man_docs(names)))
@@ -207,16 +254,23 @@ def main() -> None:
         for d in docs:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
-    # Tools from other distros (emerge, nixos-option, ...) that past accepted answers use regularly.
-    community = {n for n, c in commands_df.items()
-                 if c >= MIN_DOC_FREQ and re.fullmatch(r"[A-Za-z0-9][\w.+-]*", n)}
+    # Tools from other distros (emerge, nixos-option, ...) that past accepted answers
+    # use regularly.
+    community = {
+        n
+        for n, c in commands_df.items()
+        if c >= MIN_DOC_FREQ and re.fullmatch(r"[A-Za-z0-9][\w.+-]*", n)
+    }
     known = sorted(collect_known_commands(UBUNTU_CONTENTS, extra=community))
     (args.out_dir / "known_commands.json").write_text(json.dumps(known))
 
     stats = {
         "candidate_names": len(names),
         "docs_by_source": Counter(d["source"] for d in docs),
-        "chars_by_source": {s: sum(len(d["text"]) for d in docs if d["source"] == s) for s in ("man", "gnu")},
+        "chars_by_source": {
+            s: sum(len(d["text"]) for d in docs if d["source"] == s)
+            for s in ("man", "gnu")
+        },
         "packages": Counter(d["package"] for d in docs).most_common(),
         "known_commands": len(known),
     }
