@@ -1,7 +1,8 @@
 """LLM-as-a-Judge for a run's predictions (judge model differs from the generator).
 
 Two separate judgments per ticket:
-- correctness:  candidate vs. the community-accepted answer (1-5; "correct" = score >= 4)
+- correctness:  candidate vs. the community-accepted answer (1-5; "correct" = score >=
+  4)
 - faithfulness: are the candidate's claims supported by the passages it cites?
 Appends to eval/runs/<run_id>/judgments.jsonl; resumes and respects --budget-usd.
 """
@@ -24,8 +25,9 @@ JUDGE_REASONING_EFFORT = "low"
 CORRECT_THRESHOLD = 4
 
 CORRECTNESS_PROMPT = """You grade answers to Unix/Linux support questions.
-You get the question, a reference answer (accepted by the asker on Unix & Linux Stack Exchange), \
-and a candidate answer. Judge whether the candidate would solve the asker's problem.
+You get the question, a reference answer (accepted by the asker on Unix & Linux Stack \
+Exchange), and a candidate answer. Judge whether the candidate would solve the asker's \
+problem.
 A different approach from the reference is fine if it is correct and would work.
 Penalize wrong commands or options, unsafe advice, and missing essential steps.
 Scale:
@@ -35,14 +37,17 @@ Scale:
 2 = mostly wrong or off-target, with a little useful content
 1 = wrong, irrelevant, or harmful"""
 
-FAITHFULNESS_PROMPT = """You check whether an answer is grounded in the passages it cites.
+FAITHFULNESS_PROMPT = """You check whether an answer is grounded in the passages it \
+cites.
 supported = every key claim and command in the answer is backed by the cited passages
 partially_supported = some key claims or commands are backed, others are not
 unsupported = the cited passages do not back the answer's key claims"""
 
 
 class CorrectnessVerdict(BaseModel):
-    reasoning: str = Field(description="At most 3 sentences, written before choosing the score.")
+    reasoning: str = Field(
+        description="At most 3 sentences, written before choosing the score."
+    )
     score: Literal[1, 2, 3, 4, 5]
 
 
@@ -52,16 +57,29 @@ class FaithfulnessVerdict(BaseModel):
 
 
 def judge_correctness(item: dict, pred: dict) -> tuple[CorrectnessVerdict, float]:
-    user = (f"Question:\n{item['title']}\n\n{item['question_text']}\n\n---\n"
-            f"Reference answer:\n{item['answer_text']}\n\n---\nCandidate answer:\n{pred['draft']['answer']}")
-    r = invoke_structured(JUDGE_MODEL, CorrectnessVerdict,
-                          [SystemMessage(CORRECTNESS_PROMPT), HumanMessage(user)], JUDGE_REASONING_EFFORT)
+    user = (
+        f"Question:\n{item['title']}\n\n{item['question_text']}\n\n---\n"
+        f"Reference answer:\n{item['answer_text']}\n\n---\nCandidate "
+        f"answer:\n{pred['draft']['answer']}"
+    )
+    r = invoke_structured(
+        JUDGE_MODEL,
+        CorrectnessVerdict,
+        [SystemMessage(CORRECTNESS_PROMPT), HumanMessage(user)],
+        JUDGE_REASONING_EFFORT,
+    )
     return r.parsed, r.cost_usd
 
 
 def cited_ids(pred: dict) -> list[str]:
-    """IDs in the citations list or written inline in the answer (e.g. "(D4)"), that were retrieved."""
-    ids = list(dict.fromkeys(pred["draft"]["citations"] + re.findall(r"\b[DHP]\d+\b", pred["draft"]["answer"])))
+    """IDs in the citations list or written inline in the answer (e.g. "(D4)"), that
+    were retrieved."""
+    ids = list(
+        dict.fromkeys(
+            pred["draft"]["citations"]
+            + re.findall(r"\b[DHP]\d+\b", pred["draft"]["answer"])
+        )
+    )
     return [c for c in ids if c in pred["evidence_text"]]
 
 
@@ -71,8 +89,12 @@ def judge_faithfulness(pred: dict) -> tuple[FaithfulnessVerdict | None, float]:
         return None, 0.0
     passages = "\n\n".join(f"[{c}]\n{pred['evidence_text'][c]}" for c in cited)
     user = f"Cited passages:\n\n{passages}\n\n---\nAnswer:\n{pred['draft']['answer']}"
-    r = invoke_structured(JUDGE_MODEL, FaithfulnessVerdict,
-                          [SystemMessage(FAITHFULNESS_PROMPT), HumanMessage(user)], JUDGE_REASONING_EFFORT)
+    r = invoke_structured(
+        JUDGE_MODEL,
+        FaithfulnessVerdict,
+        [SystemMessage(FAITHFULNESS_PROMPT), HumanMessage(user)],
+        JUDGE_REASONING_EFFORT,
+    )
     return r.parsed, r.cost_usd
 
 
@@ -100,10 +122,20 @@ def main() -> None:
     args = parser.parse_args()
 
     run_dir = RUNS_DIR / args.run_id
-    preds = [p for p in latest_by_question(load_jsonl(run_dir / "predictions.jsonl")).values() if p["error"] is None]
+    preds = [
+        p
+        for p in latest_by_question(load_jsonl(run_dir / "predictions.jsonl")).values()
+        if p["error"] is None
+    ]
     items = {r["question_id"]: r for r in load_jsonl(PROCESSED_DIR / "benchmark.jsonl")}
-    run_jobs(preds, lambda pred: judge_one(items[pred["question_id"]], pred), run_dir / "judgments.jsonl",
-             args.budget_usd, args.workers, describe=lambda rec: f"score {rec['score']}")
+    run_jobs(
+        preds,
+        lambda pred: judge_one(items[pred["question_id"]], pred),
+        run_dir / "judgments.jsonl",
+        args.budget_usd,
+        args.workers,
+        describe=lambda rec: f"score {rec['score']}",
+    )
 
 
 if __name__ == "__main__":

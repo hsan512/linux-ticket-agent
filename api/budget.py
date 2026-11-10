@@ -1,8 +1,8 @@
 """A daily cap on the agent's OpenAI spending, shared by all requests.
 
-The last line of defence in code: the per-IP rate limit can be dodged with many addresses. The
-count lives in memory (lost on restart) and a ticket already running can go slightly over, so an
-OpenAI project spending limit is the hard cap.
+The last line of defence in code: the per-IP rate limit can be dodged with many
+addresses. The count lives in memory (lost on restart) and a ticket already running can
+go slightly over, so an OpenAI project spending limit is the hard cap.
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ def utc_today() -> datetime.date:
 
 
 class DailyBudget:
-    """Money spent today against a limit. The day is UTC; `today` is the clock, so a test can
-    pass a fake one."""
+    """Money spent today against a limit. The day is UTC; `today` is the clock, so a
+    test can pass a fake one."""
 
-    def __init__(self, limit_usd: float, today: Callable[[], datetime.date] = utc_today) -> None:
+    def __init__(
+        self, limit_usd: float, today: Callable[[], datetime.date] = utc_today
+    ) -> None:
         self._today = today
         self._day = today()
         self._spent = 0.0
@@ -29,7 +31,8 @@ class DailyBudget:
         self._limit_usd = limit_usd
 
     def _roll_over(self) -> None:
-        """Start a new day's count when the date has changed. Call with the lock held."""
+        """Start a new day's count when the date has changed. Call with the lock
+        held."""
         today = self._today()
         if self._day != today:
             self._day = today

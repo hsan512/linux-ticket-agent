@@ -1,7 +1,9 @@
-"""Sample the benchmark: questions created on/after HISTORY_CUTOFF, stratified by primary tag.
+"""Sample the benchmark: questions created on/after HISTORY_CUTOFF, stratified by
+primary tag.
 
 Writes eval/benchmark/benchmark_ids.json (committed: IDs + selection criteria only) and
-data/processed/benchmark.jsonl (full CC BY-SA records, git-ignored, regenerated from the IDs).
+data/processed/benchmark.jsonl (full CC BY-SA records, git-ignored, regenerated from the
+IDs).
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ import argparse
 import json
 import random
 from collections import Counter, defaultdict
-from pathlib import Path
 
 from agent.config import BENCHMARK_DIR, HISTORY_CUTOFF, PROCESSED_DIR
 
@@ -43,7 +44,8 @@ def primary_tag(tags: list[str], top: set[str]) -> str:
 
 
 def proportional_allocation(sizes: dict[str, int], total: int) -> dict[str, int]:
-    """Largest-remainder allocation of `total` across strata proportional to their sizes."""
+    """Largest-remainder allocation of `total` across strata proportional to their
+    sizes."""
     pool = sum(sizes.values())
     exact = {k: total * v / pool for k, v in sizes.items()}
     alloc = {k: int(x) for k, x in exact.items()}
@@ -53,7 +55,9 @@ def proportional_allocation(sizes: dict[str, int], total: int) -> dict[str, int]
     return alloc
 
 
-def stratified_sample(pool: list[dict], n: int, n_dev: int, rng: random.Random) -> tuple[list[dict], list[dict]]:
+def stratified_sample(
+    pool: list[dict], n: int, n_dev: int, rng: random.Random
+) -> tuple[list[dict], list[dict]]:
     tag_counts = Counter(t for r in pool for t in r["tags"])
     top = {t for t, _ in tag_counts.most_common(TOP_TAGS)}
     strata: dict[str, list[dict]] = defaultdict(list)
@@ -64,11 +68,13 @@ def stratified_sample(pool: list[dict], n: int, n_dev: int, rng: random.Random) 
     dev_alloc = proportional_allocation(alloc, n_dev)
     dev, test = [], []
     for key in sorted(strata):
-        chosen = rng.sample(sorted(strata[key], key=lambda r: r["question_id"]), alloc[key])
+        chosen = rng.sample(
+            sorted(strata[key], key=lambda r: r["question_id"]), alloc[key]
+        )
         for rec in chosen:
             rec["stratum"] = key
         dev += chosen[: dev_alloc[key]]
-        test += chosen[dev_alloc[key]:]
+        test += chosen[dev_alloc[key] :]
     return dev, test
 
 
