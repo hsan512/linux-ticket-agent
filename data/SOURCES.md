@@ -27,7 +27,8 @@ Source: `LICENSE.txt` in the release and <https://stackoverflow.com/help/licensi
 Stack Exchange's own download page asks users to agree to use the dump only for their own
 projects and not to train large language models. This project uses the data only for
 retrieval and offline evaluation. It does **not** train or fine-tune any model on it, and it
-does not redistribute the dump. Derived files (`data/processed/`) are git-ignored.
+does not redistribute the dump. Files derived from it (`data/processed/`) are git-ignored; the
+one committed file there, the command -> package table, holds no Stack Exchange content.
 
 ### Attribution
 
@@ -77,10 +78,13 @@ package content. At check time, names that appear in the ticket itself and funct
 the answer are also accepted. Remaining "unknown" names are an upper bound on invented commands
 (e.g. NixOS tools still count as unknown).
 
-**Command -> package table** (`command_packages.json`, used by the agent's `CheckCommand` tool):
-built by `data/build_packages.py` from the same noble Contents index. Executable names directly
-in `bin`, `sbin`, `usr/bin`, `usr/sbin` (hidden files dropped) mapped to the packages that ship
-them; 49,682 commands. Package and file names only; no package content.
+**Command -> package table** (`command_packages.json`, used by the agent's `CheckCommand` tool
+and by `validate`): built by `data/build_packages.py` from the same noble Contents index.
+Executable names directly in `bin`, `sbin`, `usr/bin`, `usr/sbin` (hidden files dropped) mapped
+to the packages that ship them; 49,682 commands. Package and file names only; no package content
+and nothing from Stack Exchange. Unlike the rest of `data/processed/`, this file is committed
+(2.5 MB): the API loads it at startup, so the Docker image and CI need it in a fresh clone.
+Rebuild it with `python data/build_packages.py`.
 
 The man page selection is frozen in `data/man_pages.json` (743 pages) so the corpus behind
 recorded runs cannot drift. Re-derive it only with `build_docs.py --refresh-man-selection`, and

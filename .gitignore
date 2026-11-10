@@ -4,8 +4,10 @@ __pycache__/
 .env
 
 # Downloaded dump and derived data (regenerate with data/download.py + data/build_qa.py)
+# except the package table, which the Docker image needs
 data/raw/
-data/processed/
+data/processed/*
+!data/processed/command_packages.json
 data/qdrant_storage/
 # hand-off queue: real tickets sent to the API
 data/handoff/
