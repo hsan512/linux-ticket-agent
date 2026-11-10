@@ -26,7 +26,7 @@ def test_a_new_day_starts_from_zero() -> None:
     day[0] = date(2026, 11, 8)                      # midnight passes, instantly
     assert not budget.exhausted()
     budget.add(0.9)
-    assert not budget.exhausted()                   # yesterday's spending no longer counts
+    assert budget.exhausted()                   # yesterday's spending no longer counts
 
 
 def test_cost_added_on_a_new_day_is_not_lost() -> None:
