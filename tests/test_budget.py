@@ -42,3 +42,22 @@ def test_concurrent_adds_are_all_counted() -> None:
     with ThreadPoolExecutor(8) as pool:
         list(pool.map(lambda _: budget.add(0.25), range(4000)))
     assert budget._spent == 1000.0  # 0.25 is exact in binary, so == is safe here
+
+
+def test_spent_today_starts_at_zero() -> None:
+    budget, _ = _budget()
+    assert budget.spent_today() == 0.0
+
+
+def test_spent_today_sums_the_day() -> None:
+    budget, _ = _budget()
+    budget.add(0.25)
+    budget.add(0.5)
+    assert budget.spent_today() == 0.75  # quarters are exact in binary, so == is safe
+
+
+def test_spent_today_resets_at_midnight_without_a_new_ticket() -> None:
+    budget, day = _budget()
+    budget.add(0.9)
+    day[0] = date(2026, 11, 8)
+    assert budget.spent_today() == 0.0  # the /metrics gauge must not show yesterday
