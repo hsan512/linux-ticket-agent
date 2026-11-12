@@ -4,83 +4,14 @@ needed."""
 from pathlib import Path
 
 import pytest
+from api_fakes import ANSWERED, DRAFT, BrokenGraph, FakeGraph, escalated
 from fastapi.testclient import TestClient
 
 import api.main
-from agent.schemas import AgentDraft, Evidence
+from agent.schemas import Evidence
 from api.budget import DailyBudget
-from api.handoff import save_handoff
 from api.main import FEATURES, PUBLIC_REASON, app
 from eval.common import load_jsonl
-
-
-class FakeGraph:
-    """Stands in for the compiled graph: returns a fixed final state and records the
-    input."""
-
-    def __init__(self, state: dict) -> None:
-        self.state = state
-        self.inputs: list[dict] = []
-
-    def invoke(self, state: dict, **kwargs: object) -> dict:
-        self.inputs.append(state)
-        return self.state
-
-
-def _evidence(id_: str) -> Evidence:
-    return Evidence(
-        id=id_,
-        source="docs",
-        title=f"title {id_}",
-        url=f"https://x/{id_}",
-        text="secret text",
-        score=0.5,
-    )
-
-
-DRAFT = AgentDraft(
-    answer="Use ls [D2].", commands=["ls"], citations=["D2"], confidence="high"
-)
-TRACE = [
-    {
-        "node": "draft",
-        "model": "m",
-        "input_tokens": 10,
-        "output_tokens": 5,
-        "reasoning_tokens": 0,
-        "cost_usd": 0.0012,
-        "latency_s": 1.0,
-    }
-]
-ANSWERED = {
-    "status": "answered",
-    "draft": DRAFT,
-    "final_answer": "WARNING...\n\nUse ls [D2].",
-    "evidence": [_evidence("D1"), _evidence("D2"), _evidence("H1")],
-    "trace": TRACE,
-}
-
-
-@pytest.fixture
-def queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect the hand-off queue to a temporary file, so tests never write into the
-    real one. Patching HANDOFF_PATH would not work: save_handoff's default was fixed
-    when it was defined."""
-    path = tmp_path / "handoff.jsonl"
-    monkeypatch.setattr(
-        api.main, "save_handoff", lambda record: save_handoff(record, path)
-    )
-    return path
-
-
-@pytest.fixture
-def client(queue: Path) -> TestClient:
-    # no `with`: the lifespan does not run, so the real graph is never built
-    api.main.limiter.reset()  # every test request comes from the same address
-    app.state.daily_budget = DailyBudget(
-        limit_usd=1.0
-    )  # set by the lifespan, which tests skip
-    return TestClient(app)
 
 
 def _post(client: TestClient, state: dict) -> tuple[dict, FakeGraph]:
@@ -132,7 +63,7 @@ def test_inline_citation_missing_from_the_list_still_counts(client: TestClient) 
 def test_escalated_ticket_shows_only_the_public_reason(
     client: TestClient, kind: str
 ) -> None:
-    body, _ = _post(client, _escalated(kind))
+    body, _ = _post(client, escalated(kind))
     assert (
         body["status"] == "escalated"
         and body["escalation_reason"] == PUBLIC_REASON[kind]
@@ -141,20 +72,10 @@ def test_escalated_ticket_shows_only_the_public_reason(
     assert "TimeoutExpired" not in str(body)
 
 
-def _escalated(kind: str) -> dict:
-    return ANSWERED | {
-        "status": "escalated",
-        "escalation_kind": kind,
-        "escalation_reason": "validation could not run: TimeoutExpired(cmd=['bash', "
-        "'-n'])",
-        "validation_error": "TimeoutExpired(cmd=['bash', '-n'], timeout=5.0)",
-    }
-
-
 def test_escalated_ticket_is_queued_for_a_human(
     client: TestClient, queue: Path
 ) -> None:
-    body, _ = _post(client, _escalated("unchecked"))
+    body, _ = _post(client, escalated("unchecked"))
     [record] = load_jsonl(queue)
     assert record["ticket_id"] == body["ticket_id"]  # links the two sides
     assert (
@@ -239,14 +160,9 @@ def test_failed_check_logs_the_full_error(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level("INFO", logger="api.main")
-    _post(client, _escalated("unchecked"))
+    _post(client, escalated("unchecked"))
     [warning] = [r for r in caplog.records if r.levelname == "WARNING"]
     assert "timeout=5.0" in warning.getMessage()  # the detail the queue drops
-
-
-class BrokenGraph:
-    def invoke(self, state: dict, **kwargs: object) -> dict:
-        raise RuntimeError("openai: secret internal detail")
 
 
 def test_agent_failure_is_a_generic_500(
@@ -278,7 +194,7 @@ def test_queue_failure_is_a_500_not_a_fake_hand_off(
         raise OSError("No space left on device")
 
     monkeypatch.setattr(api.main, "save_handoff", disk_full)
-    app.state.graph, app.state.context = FakeGraph(_escalated("unsafe")), object()
+    app.state.graph, app.state.context = FakeGraph(escalated("unsafe")), object()
     assert (
         client.post("/tickets", json={"title": "t", "question_text": "q"}).status_code
         == 500

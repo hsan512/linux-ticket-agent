@@ -49,3 +49,9 @@ class DailyBudget:
         with self._lock:
             self._roll_over()
             self._spent += cost
+
+    def spent_today(self) -> float:
+        """Return the total spent today, in USD."""
+        with self._lock:
+            self._roll_over()
+            return self._spent

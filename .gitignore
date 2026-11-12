@@ -13,3 +13,6 @@ data/qdrant_storage/
 data/handoff/
 eval/runs/
 .vscode/
+
+# personal Claude Code settings
+.claude/settings.local.json

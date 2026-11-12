@@ -11,9 +11,10 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Literal, get_args
 
 from fastapi import FastAPI, HTTPException, Request
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -28,6 +29,14 @@ from agent.tools.retrieval import Retriever, cited_evidence
 from agent.trace import summarize
 from api.budget import DailyBudget
 from api.handoff import base_record, handoff_record, save_handoff
+from api.metrics import (
+    BUDGET_SPENT,
+    ESCALATIONS,
+    REVISIONS,
+    TICKET_COST,
+    TICKET_DURATION,
+    TICKETS,
+)
 
 # One line per ticket, keyed by ticket_id. Never the ticket text: it is user data, and
 # the hand-off queue already keeps it for escalated tickets.
@@ -38,9 +47,11 @@ DAILY_BUDGET = 1.0
 
 # the benchmark's limit (eval/make_benchmark.py): longer tickets were never measured
 MAX_QUESTION_CHARS = 4000
+
 HandoffKind = (
     EscalationKind | Literal["too_long"]
 )  # too_long is decided here, before the agent runs
+Outcome = Literal["answered", "escalated", "too_long", "budget_exhausted", "error"]
 
 # shown to the asker instead of escalation_reason, which may hold internal details
 PUBLIC_REASON: dict[HandoffKind, str] = {
@@ -49,6 +60,14 @@ PUBLIC_REASON: dict[HandoffKind, str] = {
     "not_confident": "The agent is not confident enough in its answer.",
     "too_long": "The question is too long to be processed automatically.",
 }
+
+# Create every label value up front so /metrics shows 0 instead of no series until
+# the first ticket of that kind; dashboards and rate() handle 0 better than a missing
+# series.
+for kind in PUBLIC_REASON:
+    ESCALATIONS.labels(kind=kind)
+for outcome in get_args(Outcome):
+    TICKETS.labels(outcome=outcome)
 
 # Per client IP, so one sender cannot run up the OpenAI bill (a ticket costs about
 # $0.013). Counts live in this process's memory: they reset on restart. Behind a load
@@ -134,6 +153,7 @@ async def lifespan_context(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.graph = build_graph(FEATURES)
     app.state.daily_budget = DailyBudget(limit_usd=DAILY_BUDGET)
+    BUDGET_SPENT.set_function(app.state.daily_budget.spent_today)
     logger.info("ready: %s", FEATURES.version)
     yield
 
@@ -147,6 +167,7 @@ app.state.limiter = limiter  # slowapi looks for it here
 app.add_exception_handler(
     RateLimitExceeded, _rate_limit_exceeded_handler
 )  # over the limit -> 429
+Instrumentator(excluded_handlers=["/metrics", "/health"]).instrument(app).expose(app)
 
 
 @app.get("/health")
@@ -157,11 +178,10 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "version": FEATURES.version}
 
 
-def log_ticket(ticket_id: str, state: AgentState, wall_s: float) -> None:
+def log_ticket(ticket_id: str, state: AgentState, wall_s: float, summary: dict) -> None:
     """One INFO line per agent run: outcome, cost, and time. A check that could not run
     also gets a WARNING with the full error, which the hand-off record and the asker
     never see."""
-    summary = summarize(state, wall_s)
     outcome = (
         f"escalated {state['escalation_kind']}"
         if state["status"] == "escalated"
@@ -198,6 +218,7 @@ def create_ticket(body: TicketRequest, request: Request) -> TicketResponse:
     except HTTPException:
         raise  # deliberate answers such as 503, not failures
     except Exception:
+        TICKETS.labels(outcome="error").inc()
         logger.exception("ticket %s: failed", ticket_id)  # with the stack trace
         raise HTTPException(
             status_code=500, detail=f"Internal error. Reference: {ticket_id}"
@@ -220,6 +241,8 @@ def handle_ticket(
         save_handoff(
             base_record(ticket_id, ticket, "too_long", reason, FEATURES.version)
         )
+        ESCALATIONS.labels(kind="too_long").inc()
+        TICKETS.labels(outcome="too_long").inc()
         logger.info(
             "ticket %s: escalated too_long, %d question chars, agent not run",
             ticket_id,
@@ -232,16 +255,23 @@ def handle_ticket(
         )
     start = time.perf_counter()
     if app_state.daily_budget.exhausted():
+        TICKETS.labels(outcome="budget_exhausted").inc()
         logger.warning("ticket %s: daily budget reached", ticket_id)
         raise HTTPException(
             status_code=503, detail="Daily budget reached; try again tomorrow (UTC)."
         )
     state = run_ticket(app_state.graph, ticket, app_state.context)
     wall_s = time.perf_counter() - start
-    log_ticket(ticket_id, state, wall_s)
-    app_state.daily_budget.add(summarize(state, wall_s)["cost_usd"])
+    summary = summarize(state, wall_s)
+    log_ticket(ticket_id, state, wall_s, summary)
+    app_state.daily_budget.add(summary["cost_usd"])
+    TICKET_DURATION.observe(wall_s)
+    TICKET_COST.observe(summary["cost_usd"])
+    REVISIONS.inc(state.get("revise_attempts", 0))
     if state["status"] == "escalated":
         save_handoff(handoff_record(ticket_id, ticket, state, FEATURES.version))
+        ESCALATIONS.labels(kind=state["escalation_kind"]).inc()
+        TICKETS.labels(outcome="escalated").inc()
         return TicketResponse(
             ticket_id=ticket_id,
             status="escalated",
@@ -251,6 +281,7 @@ def handle_ticket(
     citations = [
         Citation.model_validate(e, from_attributes=True) for e in cited
     ]  # convert Evidence -> Citation
+    TICKETS.labels(outcome="answered").inc()
     return TicketResponse(
         ticket_id=ticket_id,
         status="answered",

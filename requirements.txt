@@ -7,6 +7,8 @@ llama-index-core==0.14.25
 llama-index-embeddings-openai==0.7.0
 llama-index-vector-stores-qdrant==0.10.4
 openai==3.35.1
+prometheus-client==0.26.0
+prometheus-fastapi-instrumentator==8.1.0
 py7zr==1.1.4
 pydantic==2.14.1
 pytest==9.1.1
