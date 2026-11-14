@@ -34,19 +34,24 @@ def get(base: str, path: str, auth: str) -> dict | list:
         return json.load(response)
 
 
-def wait_until_up(base: str, auth: str) -> None:
-    """Grafana answers /api/health before provisioning is done, so also wait for
-    the dashboard search to work."""
+def wait_until_provisioned(base: str, auth: str, title: str) -> None:
+    """Grafana's API answers before provisioning has finished (on a slow CI runner
+    the data source was still a 404), so wait until the data source and the
+    dashboard both exist. Whether they are correct is checked afterwards."""
     deadline = time.monotonic() + STARTUP_TIMEOUT_S
     while True:
         try:
-            if get(base, "/api/health", auth).get("database") == "ok":
-                get(base, "/api/search?type=dash-db", auth)
+            get(base, f"/api/datasources/uid/{DATASOURCE_UID}", auth)
+            titles = [d["title"] for d in get(base, "/api/search?type=dash-db", auth)]
+            if title in titles:
                 return
         except (urllib.error.URLError, ConnectionError, TimeoutError, ValueError):
-            pass
+            pass  # not up yet, or the data source not provisioned yet (HTTP 404)
         if time.monotonic() > deadline:
-            sys.exit(f"FAIL: Grafana not up after {STARTUP_TIMEOUT_S}s at {base}")
+            sys.exit(
+                f"FAIL: data source {DATASOURCE_UID!r} and dashboard {title!r} not "
+                f"provisioned after {STARTUP_TIMEOUT_S}s at {base}"
+            )
         time.sleep(2)
 
 
@@ -62,15 +67,22 @@ def main() -> None:
     if not password:
         sys.exit("FAIL: set GRAFANA_ADMIN_PASSWORD")
     auth = base64.b64encode(f"admin:{password}".encode()).decode()
-    wait_until_up(base, auth)
+    spec = json.loads(DASHBOARD_FILE.read_text())["spec"]
+    wait_until_provisioned(base, auth, spec["title"])
 
-    health = get(base, f"/api/datasources/uid/{DATASOURCE_UID}/health", auth)
+    for _ in range(15):  # Prometheus may still be starting: retry for up to ~30 s
+        try:
+            health = get(base, f"/api/datasources/uid/{DATASOURCE_UID}/health", auth)
+        except urllib.error.HTTPError as error:  # Grafana answers 400 while it fails
+            health = json.load(error)
+        if health.get("status") == "OK":
+            break
+        time.sleep(2)
     check(
         health.get("status") == "OK",
         f"data source '{DATASOURCE_UID}' reaches Prometheus ({health.get('message')})",
     )
 
-    spec = json.loads(DASHBOARD_FILE.read_text())["spec"]
     found = [
         d
         for d in get(base, "/api/search?type=dash-db", auth)
