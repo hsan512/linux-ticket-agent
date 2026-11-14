@@ -1,0 +1,58 @@
+groups:
+  - name: api-down
+    rules:
+      - alert: TicketApiDown
+        expr: up{job="ticket-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The ticket API is down"
+          description: "Prometheus has not reached the API for over a minute, so no tickets are being answered. Check that the api container is running and read its logs."
+  - name: daily-budget-almost-exceed
+    rules:
+      - alert: DailyBudgetAlmostExceed
+        # 0.8 = 80% of DAILY_BUDGET (1.0 USD) in api/main.py; change both together
+        expr: daily_budget_spent_usd > 0.8
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Today's OpenAI budget is almost used up"
+          description: "${{ $value | printf \"%.2f\" }} of the $1.00 daily budget is spent. Once it runs out, new tickets are refused (HTTP 503) until midnight UTC."
+  - name: ticket-error
+    rules:
+      - alert: TicketError
+        expr: increase(tickets_total{outcome="error"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tickets are failing with internal errors"
+          description: "At least one ticket in the last 10 minutes ended in an HTTP 500. Search the API logs for 'failed' to find the ticket ID and error; common causes are OpenAI or Qdrant being unreachable."
+  - name: high-escalation-rate
+    rules:
+      - alert: HighEscalationRate
+        expr: |
+          (
+            sum(increase(tickets_total{outcome="escalated"}[1h]))
+            / sum(increase(tickets_total{outcome=~"answered|escalated"}[1h]))
+          ) > 0.6
+          and
+          sum(increase(tickets_total{outcome=~"answered|escalated"}[1h])) >= 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The agent is handing off most tickets to humans"
+          description: "Over 60% of the tickets the agent ran in the last hour were escalated, while about a third is normal. Check the hand-off queue for a common reason, such as validation failing or retrieval returning nothing."
+  - name: slow-ticket
+    rules:
+      - alert: SlowTicket
+        expr: histogram_quantile(0.95, sum by (le) (rate(ticket_duration_seconds_bucket[30m]))) > 60
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tickets are taking too long"
+          description: "For over 10 minutes, the slowest 5% of agent runs have taken more than 60 seconds (normally 10 to 30). OpenAI may be slow or rate-limiting the API."
