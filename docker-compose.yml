@@ -32,5 +32,21 @@ services:
     depends_on: [api]
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:13.3.1
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana/provisioning/dashboards/provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./monitoring/grafana/dashboards/ticket-agent.json:/etc/grafana/dashboards/ticket-agent.json:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set it in the shell}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on: [prometheus]
+    restart: unless-stopped
+
 volumes:
   prometheus_data:
+  grafana_data:

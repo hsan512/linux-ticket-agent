@@ -53,12 +53,39 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v7
+            - name: Check docker-compose.yml
+              run: docker compose config -q
+              env:
+                  # the file requires both variables; nothing starts here, so any value works
+                  OPENAI_API_KEY: dummy
+                  GRAFANA_ADMIN_PASSWORD: dummy
             - name: Check Prometheus config
               run: $PROMTOOL check config prometheus.yml
             - name: Check alert rules
               run: $PROMTOOL check rules alerts.yml
             - name: Test alert rules
               run: $PROMTOOL test rules alerts_test.yml
+    grafana-smoke:
+        runs-on: ubuntu-latest
+        env:
+            OPENAI_API_KEY: dummy  # required by docker-compose.yml; the API is not started
+            GRAFANA_ADMIN_PASSWORD: smoke-test-only
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v7
+            - name: Start Prometheus and Grafana only
+              # --no-deps: skip api and qdrant, so no image build and no OpenAI key
+              run: docker compose up -d --no-deps prometheus grafana
+            - name: Check that Grafana provisioned the data source and dashboard
+              run: python3 tests/smoke_grafana.py http://localhost:3000
+            - name: No dashboard provisioning errors in Grafana's log
+              run: |
+                  if docker compose logs grafana | grep -iE 'provisioning.dashboard.*level=error|failed to load dashboard'; then
+                      exit 1
+                  fi
+            - name: Grafana log (on failure)
+              if: failure()
+              run: docker compose logs grafana
 
 permissions:
     contents: read

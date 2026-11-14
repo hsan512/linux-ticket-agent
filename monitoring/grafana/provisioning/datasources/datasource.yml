@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus            # fixed ID: the dashboard JSON points to it
+    access: proxy              # Grafana's server queries Prometheus, not your browser
+    url: http://prometheus:9090   # compose service name, as with api:8000
+    isDefault: true
+    editable: false
