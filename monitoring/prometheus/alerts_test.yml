@@ -1,0 +1,181 @@
+# Unit tests for alerts.yml: fake series in, expected alerts out.
+# Run: promtool test rules monitoring/prometheus/alerts_test.yml
+# Series use the real metric names, so a misspelled name in a rule makes its test fail.
+# exp_annotations must match alerts.yml word for word: update both together.
+
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  # API unreachable for 3 minutes: pending at first, firing after `for: 1m`.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="ticket-api", instance="api:8000"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: TicketApiDown
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: TicketApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: ticket-api
+              instance: api:8000
+            exp_annotations:
+              summary: "The ticket API is down"
+              description: "Prometheus has not reached the API for over a minute, so no tickets are being answered. Check that the api container is running and read its logs."
+
+  # API up: no alert.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="ticket-api", instance="api:8000"}'
+        values: '1x12'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: TicketApiDown
+        exp_alerts: []
+
+  # Budget: quiet at $0.50, fires once spending passes $0.80.
+  - interval: 15s
+    input_series:
+      - series: 'daily_budget_spent_usd{job="ticket-api", instance="api:8000"}'
+        values: '0.5 0.5 0.85 0.85'
+    alert_rule_test:
+      - eval_time: 15s
+        alertname: DailyBudgetAlmostExceed
+        exp_alerts: []
+      - eval_time: 45s
+        alertname: DailyBudgetAlmostExceed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: ticket-api
+              instance: api:8000
+            exp_annotations:
+              summary: "Today's OpenAI budget is almost used up"
+              description: "$0.85 of the $1.00 daily budget is spent. Once it runs out, new tickets are refused (HTTP 503) until midnight UTC."
+
+  # One 500 error: fires; ten minutes later it has left the window and stops.
+  - interval: 1m
+    input_series:
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="error"}'
+        values: '0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: TicketError
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: TicketError
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: ticket-api
+              instance: api:8000
+              outcome: error
+            exp_annotations:
+              summary: "Tickets are failing with internal errors"
+              description: "At least one ticket in the last 10 minutes ended in an HTTP 500. Search the API logs for 'failed' to find the ticket ID and error; common causes are OpenAI or Qdrant being unreachable."
+      - eval_time: 20m
+        alertname: TicketError
+        exp_alerts: []
+
+  # Errors from other outcomes never trigger TicketError.
+  - interval: 1m
+    input_series:
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="answered"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TicketError
+        exp_alerts: []
+
+  # 8 of 10 agent runs escalated in the hour: rate 0.8 with enough volume, fires.
+  # The 50 too_long tickets must not count: if they did, the rate would be 8/60.
+  - interval: 1m
+    input_series:
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="escalated"}'
+        values: '0 8x70'
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="answered"}'
+        values: '0 2x70'
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="too_long"}'
+        values: '0 50x70'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HighEscalationRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The agent is handing off most tickets to humans"
+              description: "Over 60% of the tickets the agent ran in the last hour were escalated, while about a third is normal. Check the hand-off queue for a common reason, such as validation failing or retrieval returning nothing."
+
+  # 2 of 2 escalated: rate 1.0 but too few tickets to mean anything, quiet.
+  - interval: 1m
+    input_series:
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="escalated"}'
+        values: '0 2x70'
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="answered"}'
+        values: '0x70'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HighEscalationRate
+        exp_alerts: []
+
+  # 2 of 20 escalated: plenty of tickets, normal rate, quiet. too_long and
+  # budget_exhausted are not agent runs, so even many of them do not count.
+  - interval: 1m
+    input_series:
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="escalated"}'
+        values: '0 2x70'
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="answered"}'
+        values: '0 18x70'
+      - series: 'tickets_total{job="ticket-api", instance="api:8000", outcome="too_long"}'
+        values: '0 50x70'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HighEscalationRate
+        exp_alerts: []
+
+  # Every run takes 60-120 s: p95 > 60 s for over 10 minutes, fires.
+  - interval: 15s
+    input_series:
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="30.0"}'
+        values: '0x240'
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="60.0"}'
+        values: '0x240'
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="120.0"}'
+        values: '0+1x240'
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="+Inf"}'
+        values: '0+1x240'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SlowTicket
+        exp_alerts: []  # condition true, but still inside `for: 10m`
+      - eval_time: 30m
+        alertname: SlowTicket
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Tickets are taking too long"
+              description: "For over 10 minutes, the slowest 5% of agent runs have taken more than 60 seconds (normally 10 to 30). OpenAI may be slow or rate-limiting the API."
+
+  # Every run takes under 30 s: quiet.
+  - interval: 15s
+    input_series:
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="30.0"}'
+        values: '0+1x240'
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="60.0"}'
+        values: '0+1x240'
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="120.0"}'
+        values: '0+1x240'
+      - series: 'ticket_duration_seconds_bucket{job="ticket-api", instance="api:8000", le="+Inf"}'
+        values: '0+1x240'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: SlowTicket
+        exp_alerts: []
