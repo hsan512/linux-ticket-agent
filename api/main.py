@@ -6,7 +6,10 @@ they are read-only, while each ticket's state lives only inside its own graph ru
 
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -14,12 +17,14 @@ from contextlib import asynccontextmanager
 from typing import Literal, get_args
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.datastructures import State
+from starlette.responses import Response
 
 from agent.config import PROCESSED_DIR
 from agent.graph import Features, build_graph, run_ticket
@@ -69,12 +74,35 @@ for kind in PUBLIC_REASON:
 for outcome in get_args(Outcome):
     TICKETS.labels(outcome=outcome)
 
+
+def client_ip(request: Request) -> str:
+    """The rate-limit key: the viewer's IP from CloudFront-Viewer-Address ("ip:port",
+    IPv6 without brackets, so the port is cut at the last colon). CloudFront sets
+    this header itself and overwrites any value the client sends, while the leftmost
+    X-Forwarded-For entry is written by the client and would let anyone pick a new
+    IP per request. Without the header (local dev, tests) the socket address is
+    used."""
+    header = request.headers.get("CloudFront-Viewer-Address")
+    if not header:
+        return get_remote_address(request)
+    host, sep, _ = header.rpartition(":")
+    if not sep:
+        return header.strip("[]")
+    return host.strip("[]")
+
+
 # Per client IP, so one sender cannot run up the OpenAI bill (a ticket costs about
-# $0.013). Counts live in this process's memory: they reset on restart. Behind a load
-# balancer every request has its IP, so uvicorn must then run with --proxy-headers to
-# see the real client.
+# $0.013). Counts live in this process's memory: they reset on restart. Behind
+# CloudFront the socket address is CloudFront's, so the key comes from client_ip; its
+# header can be trusted only because verify_origin admits CloudFront traffic alone.
 TICKET_RATE_LIMIT = "5/minute;30/day"
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
+
+# Shared with our CloudFront distribution, which adds it as X-Origin-Verify. The
+# security group admits only CloudFront, but every CloudFront customer's distribution
+# shares those addresses; the secret proves the request came through ours. Empty
+# (local dev, CI) turns the check off.
+ORIGIN_SECRET = os.environ.get("ORIGIN_SECRET", "")
 
 # the configuration measured on test (eval/results/findings.md, item 31)
 FEATURES = Features(
@@ -168,6 +196,36 @@ app.add_exception_handler(
     RateLimitExceeded, _rate_limit_exceeded_handler
 )  # over the limit -> 429
 Instrumentator(excluded_handlers=["/metrics", "/health"]).instrument(app).expose(app)
+
+
+@app.middleware("http")
+async def verify_origin(request: Request, call_next) -> Response:
+    """Let a request in only if it came through our CloudFront distribution, so nobody
+    can skip the edge rules (such as the /metrics block) or fake the rate-limit header.
+    Exceptions: /health (checked from the instance by deploy.sh), and /metrics from a
+    private address (Prometheus on the compose network). The 403 is returned, not
+    raised: FastAPI's exception handlers do not run for middleware."""
+    header = request.headers.get("X-Origin-Verify", "")
+    path = request.url.path
+    if not ORIGIN_SECRET or path == "/health":
+        response = await call_next(request)
+        return response
+    if path == "/metrics":
+        if request.client:
+            try:
+                ip_address = ipaddress.ip_address(request.client.host)
+            except ValueError:
+                pass
+            else:
+                if ip_address.is_private:
+                    response = await call_next(request)
+                    return response
+    # constant time, so response timing does not reveal how much of a guess is right;
+    # bytes, because compare_digest rejects non-ASCII str with a TypeError (a 500)
+    if hmac.compare_digest(header.encode(), ORIGIN_SECRET.encode()):
+        response = await call_next(request)
+        return response
+    return JSONResponse({"detail": "Forbidden"}, status_code=403)
 
 
 @app.get("/health")

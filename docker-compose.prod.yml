@@ -1,0 +1,6 @@
+services:
+  api:
+    image: ghcr.io/hsan512/linux-ticket-agent:${IMAGE_TAG:?set IMAGE_TAG}
+    ports: !override ["8000:8000"]
+    environment:
+      ORIGIN_SECRET: ${ORIGIN_SECRET:?}
