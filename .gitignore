@@ -16,3 +16,8 @@ eval/runs/
 
 # personal Claude Code settings
 .claude/settings.local.json
+
+# Terraform: provider downloads and state (state lives in S3; bootstrap state stays local)
+.terraform/
+*.tfstate
+*.tfstate.*
