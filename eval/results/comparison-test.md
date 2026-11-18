@@ -1,4 +1,7 @@
 | Run | System | Accuracy (95% CI) | vs ref: wins / losses (McNemar) | Answers w/ invalid cmd | Cost/ticket | Cost p95 | Cost/correct | Latency p50 / p95 | LLM calls | Tokens in / out |
+
+> **Note (2026-11-18):** measured before three later changes that were not re-evaluated: the agent's prompts now forbid follow-up offers ("If you want, I can...") and the grader keeps passages that point to a needed command, which change answers, and the command check gained warnings-only rules, which cannot change routing. See [findings item 32](findings.md#2026-11-18-changes-after-the-final-test-run-not-re-measured).
+
 |---|---|---|---|---|---|---|---|---|---|---|
 | `baseline-test` | rag | 38.8% (32%-46%) | reference | 3.2% | $0.0055 | $0.0079 | $0.0141 | 2.9s / 4.1s | 1.0 | 4871 / 399 |
 | `baseline-test-r2` | rag | 35.0% (28%-43%) | +13 / -19 (p=0.377) | 8.6% | $0.0055 | $0.0077 | $0.0157 | 2.9s / 4.0s | 1.0 | 4871 / 406 |

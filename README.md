@@ -60,6 +60,8 @@ least 4 out of 5 against the community-accepted answer.
 | Agent v2: + evidence grading and query rewriting | 35.0% (28-43%) | 100% | $0.0114 | 6.3 s |
 | Agent v4: + escalation rule, validate/revise | **46.3%** on answered (37-56%) | 67.5% | $0.0129 | 7.2 s |
 
+> **Note:** these numbers were measured before three later changes that were not re-evaluated: the agent's prompts now tell it that it gets only one reply (no "If you want, I can..." offers) and the evidence grader keeps passages that point to a needed command from another page (both change answers, so the deployed agent's accuracy is unmeasured), and the command check gained warnings-only rules (partition tools, Windows boot commands, prompt-injection patterns), which add warnings but cannot change routing. Details in [findings item 32](eval/results/findings.md#2026-11-18-changes-after-the-final-test-run-not-re-measured).
+
 Agent v4 over all 160 drafts, escalated ones included, is 35.0%: the gain comes entirely from
 choosing what not to answer. The full table, with McNemar tests, cost percentiles, and a
 2024+ subset, is in [`eval/results/comparison-test.md`](eval/results/comparison-test.md).
