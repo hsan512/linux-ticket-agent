@@ -4,3 +4,7 @@ services:
     ports: !override ["8000:8000"]
     environment:
       ORIGIN_SECRET: ${ORIGIN_SECRET:?}
+  # local only: in production CloudFront and S3 serve the page (a profile nobody
+  # enables keeps deploy.sh from starting or pulling it)
+  web:
+    profiles: [local-only]
