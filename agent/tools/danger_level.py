@@ -4,8 +4,11 @@ Words that bash expands (variables, command substitution) are judged by their wo
 case: what the command would do if the expansion came out empty or unexpected.
 
 This is a guardrail against likely mistakes in model-written commands, not a security
-boundary: deliberate obfuscation (eval, variables holding commands, encoded payloads) is
-not detected.
+boundary. A few common prompt-injection patterns are warned about (code run straight
+from a download or base64, reverse shells, new SSH keys or admin rights, uploads of
+credential files), but deliberate obfuscation (variables holding commands, interpreters
+such as python -c, a payload downloaded by one command and run by the next) is not
+detected.
 """
 
 from __future__ import annotations
@@ -542,6 +545,363 @@ def _shell(cmd: SimpleCommand) -> tuple[Level, str] | None:
     return None
 
 
+# --- warnings only: disks, partitions, and prompt-injection patterns ---
+# Added after the measured runs (eval/results/findings.md). Every rule below returns
+# "destructive" only: the answer gets a warning, but nothing is revised or escalated
+# (only syntax and catastrophic do that, see agent/nodes/validate.py), so the routing
+# that was measured stays the same.
+
+DOWNLOAD = re.compile(r"\b(curl|wget|fetch)\b")
+
+
+def _devices(cmd: SimpleCommand) -> list[str]:
+    return [o.text for o in cmd.operands if o.text.startswith("/dev/")]
+
+
+def _parted(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """parted DEVICE [COMMAND ...]. parted applies each change immediately (there is no
+    separate "write" step), so rm and mklabel delete data as soon as they run."""
+    if {"-l", "--list"} & set(cmd.options):
+        return None
+    words = [o.text for o in cmd.operands]
+    devices = _devices(cmd) or ["the disk"]
+    for i, word in enumerate(words):
+        if word == "rm":
+            number = words[i + 1] if i + 1 < len(words) else "a partition"
+            return "destructive", f"parted deletes partition {number} on {devices[0]}"
+        if word in ("mklabel", "mktable"):
+            return (
+                "destructive",
+                f"parted writes a new, empty partition table on {devices[0]}: every "
+                f"partition on it is lost",
+            )
+        if word == "resizepart":
+            return (
+                "destructive",
+                f"parted resizes a partition on {devices[0]}; shrinking it below its "
+                f"data loses that data",
+            )
+    if words == [devices[0]]:  # interactive session on a disk
+        return (
+            "destructive",
+            f"opens parted on {devices[0]}; its rm and mklabel commands delete data "
+            f"immediately, without a separate save step",
+        )
+    return None
+
+
+def _fdisk(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """fdisk, gdisk, cfdisk, cgdisk: interactive partition editors. Listing (-l) is
+    harmless; editing a disk can delete partitions once the table is written."""
+    if {"-l", "--list"} & set(cmd.options):
+        return None
+    devices = _devices(cmd)
+    if not devices:
+        return None
+    return (
+        "destructive",
+        f"{cmd.name} edits the partition table of {devices[0]}: deleting a partition "
+        f"and writing the table loses the data on it",
+    )
+
+
+SFDISK_READ_ONLY = frozenset(
+    {"-l", "--list", "-d", "--dump", "-J", "--json", "-s", "--show-size", "-V",
+     "--verify", "-g", "--show-geometry", "-F", "--list-free", "-h", "--help",
+     "-v", "--version"}
+)  # fmt: skip
+
+
+def _sfdisk(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """sfdisk --delete removes partitions; sfdisk DEVICE without a read-only option
+    writes a new partition table read from its input, replacing the old one."""
+    devices = _devices(cmd)
+    if "--delete" in cmd.options:
+        return "destructive", f"sfdisk deletes partitions on {' '.join(devices)}"
+    if devices and not SFDISK_READ_ONLY & set(cmd.options):
+        return (
+            "destructive",
+            f"sfdisk writes a new partition table on {devices[0]} from its input; "
+            f"the existing partitions are replaced",
+        )
+    return None
+
+
+SGDISK_DESTRUCTIVE = frozenset(
+    {"-Z", "--zap-all", "-z", "--zap", "-d", "--delete", "-o", "--clear"}
+)
+
+
+def _sgdisk(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """sgdisk: --zap-all/--zap erase the partition tables, --clear starts an empty
+    one, --delete removes a partition. Printing (-p) is harmless."""
+    found = [o for o in cmd.options if o.split("=")[0] in SGDISK_DESTRUCTIVE]
+    if not found:
+        return None
+    where = " ".join(_devices(cmd)) or "the disk"
+    return (
+        "destructive",
+        f"sgdisk {found[0]} removes partitions or the partition table on {where}",
+    )
+
+
+def _shred(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """shred overwrites its targets so they cannot be recovered."""
+    targets = [o.text for o in cmd.operands if not o.text.isdigit()]  # -n 3: a count
+    if not targets:
+        return None
+    if any(DISK.match(t) for t in targets):
+        return (
+            "destructive",
+            f"shred overwrites all of {' '.join(targets)}: nothing on it can be "
+            f"recovered",
+        )
+    return "destructive", f"shred overwrites {' '.join(targets)} beyond recovery"
+
+
+def _blkdiscard(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """blkdiscard tells an SSD that every block is unused: the data is gone at once."""
+    devices = _devices(cmd)
+    if not devices:
+        return None
+    return "destructive", f"blkdiscard discards every block on {devices[0]}"
+
+
+def _lvm_remove(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """pvremove, vgremove, lvremove: delete LVM volumes and the data on them."""
+    if not cmd.operands:
+        return None
+    targets = " ".join(o.text for o in cmd.operands)
+    return "destructive", f"{cmd.name} removes {targets}; the data on it is lost"
+
+
+def _cryptsetup(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """cryptsetup actions that destroy encrypted data or the keys to it."""
+    if not cmd.operands:
+        return None
+    action, rest = cmd.operands[0].text.lower(), cmd.operands[1:]
+    target = rest[0].text if rest else "the device"
+    if action in ("luksformat", "erase", "lukserase"):
+        return (
+            "destructive",
+            f"cryptsetup {cmd.operands[0].text} makes all data on {target} "
+            f"unreadable for good",
+        )
+    if action in ("lukskillslot", "luksremovekey"):
+        return (
+            "destructive",
+            f"cryptsetup {cmd.operands[0].text} removes a key from {target}; "
+            f"removing the last one locks the data away for good",
+        )
+    return None
+
+
+def _efibootmgr(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """efibootmgr -B deletes a UEFI boot entry."""
+    if {"-B", "--delete-bootnum"} & set(cmd.options):
+        return (
+            "destructive",
+            "efibootmgr -B deletes a UEFI boot entry; if it is the one in use, the "
+            "computer may not start",
+        )
+    return None
+
+
+def _shell_source(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """A shell (or source / .) running code it cannot show the reader first:
+    piped from a download, decoded from base64, or a download in <(...)."""
+    found = _shell(cmd)
+    if found:
+        return found
+    if cmd.stdin_from in ("base64", "xxd"):
+        return (
+            "destructive",
+            f"runs a script decoded by {cmd.stdin_from}: its content is hidden from "
+            f"the reader",
+        )
+    for operand in cmd.operands:
+        if "processsubstitution" in operand.expansions and DOWNLOAD.search(
+            operand.text
+        ):
+            return (
+                "destructive",
+                f"runs a script straight from a download ({operand.text}); download, "
+                f"read, then run",
+            )
+    return None
+
+
+def _downloaded_command(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """Any command whose name is the output of a download, e.g. what bash -c
+    "$(curl -fsSL URL)" runs."""
+    if cmd.words:
+        name = cmd.words[0]
+        if "commandsubstitution" in name.expansions and DOWNLOAD.search(name.text):
+            return (
+                "destructive",
+                f"runs whatever {name.text} returns, unread; download, read, then run",
+            )
+    return None
+
+
+def _reverse_shell(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """nc/ncat -e or -c, socat EXEC:/SYSTEM: hand a shell to the other end."""
+    if cmd.name == "socat":
+        if any(re.match(r"(exec|system):", o.text, re.I) for o in cmd.operands):
+            return (
+                "destructive",
+                "socat connects a program on this computer to the network; if it is a "
+                "shell, whoever is at the other end controls this computer",
+            )
+        return None
+    if {"-e", "-c", "--exec", "--sh-exec", "--lua-exec"} & set(cmd.options):
+        return (
+            "destructive",
+            f"{cmd.name} runs a program for the remote side (a reverse shell): whoever "
+            f"is at the other end controls this computer",
+        )
+    return None
+
+
+AUTHORIZED_KEYS = re.compile(r"\.ssh/authorized_keys2?$")
+SUDOERS = re.compile(r"^/etc/sudoers(\.d/.*)?$")
+
+
+def _sensitive_write(path: str) -> str | None:
+    """Why appending to or replacing `path` grants access, or None."""
+    if AUTHORIZED_KEYS.search(path):
+        return f"adds an SSH key to {path}: its owner can log in as this user"
+    if SUDOERS.match(path):
+        return f"changes {path}, which decides who gets administrator rights"
+    return None
+
+
+def _network_or_access_redirect(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """Redirections that connect to the network (bash's /dev/tcp, a reverse shell
+    when a shell is involved) or grant access (authorized_keys, sudoers)."""
+    for op, target in cmd.redirects:
+        if re.match(r"/dev/(tcp|udp)/", target.text):
+            return (
+                "destructive",
+                f"connects to {target.text}; with a shell, whoever is at the other end "
+                f"controls this computer",
+            )
+        why = _sensitive_write(target.text) if op in (">", ">>", ">|") else None
+        if why:
+            return "destructive", why
+    return None
+
+
+def _tee(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """tee [-a] FILE: the same access files as a redirect."""
+    for operand in cmd.operands:
+        why = _sensitive_write(operand.text)
+        if why:
+            return "destructive", why
+    return None
+
+
+ADMIN_GROUPS = frozenset({"sudo", "wheel", "admin", "root"})
+
+
+def _admin_group(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """usermod -aG sudo USER, gpasswd -a USER sudo, adduser USER sudo."""
+    words = [o.text for o in cmd.operands]
+    groups = ADMIN_GROUPS & set(words)
+    if not groups:
+        return None
+    if cmd.name == "usermod" and not any(
+        "G" in o or o == "--groups" for o in cmd.options
+    ):
+        return None
+    if cmd.name == "adduser" and len(words) != 2:
+        return None  # adduser NAME alone creates a user
+    user = next((w for w in words if w not in groups), "a user")
+    return "destructive", f"gives {user} administrator rights (group {min(groups)})"
+
+
+SECRET_FILE = re.compile(
+    r"(\.ssh/|\.aws/|\.gnupg/|\.kube/config|\.docker/config\.json|\.netrc|"
+    r"(^|/)\.env$|/etc/shadow|id_(rsa|ed25519|ecdsa|dsa)|\.pem$|credentials)"
+)
+UPLOAD_NEXT = frozenset({"-T", "--upload-file", "--post-file", "--body-file"})
+
+
+def _upload(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """curl/wget sending a file that holds secrets: -d @FILE, -F name=@FILE, -T FILE,
+    --post-file=FILE."""
+    words = [w.text for w in cmd.words[1:]]
+    for i, word in enumerate(words):
+        candidates = []
+        if "@" in word:
+            candidates.append(word.split("@", 1)[1])
+        if "=" in word and word.split("=")[0] in UPLOAD_NEXT:
+            candidates.append(word.split("=", 1)[1])
+        if i > 0 and words[i - 1] in UPLOAD_NEXT:
+            candidates.append(word)
+        for path in candidates:
+            if SECRET_FILE.search(path):
+                return (
+                    "destructive",
+                    f"{cmd.name} sends {path} to a remote server; it holds secrets",
+                )
+    return None
+
+
+def _crontab(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """crontab -r deletes every scheduled job; crontab fed by a download installs
+    jobs nobody has read."""
+    if "-r" in cmd.options:
+        return "destructive", "crontab -r deletes all of this user's scheduled jobs"
+    if cmd.stdin_from in DOWNLOADERS:
+        return (
+            "destructive",
+            f"installs scheduled jobs straight from {cmd.stdin_from}, unread",
+        )
+    return None
+
+
+def _windows_disk(cmd: SimpleCommand) -> tuple[Level, str] | None:
+    """Windows boot and disk commands, common in answers about dual boot. The Linux
+    checks cannot read them (they only get the unknown-command note), so the
+    best-known ones that rewrite boot records or erase drives are named here."""
+    name = cmd.name.lower().removesuffix(".exe")
+    args = [w.text.lower() for w in cmd.words[1:]]
+    if name == "bootsect" and any(a == "/mbr" or a.startswith("/nt") for a in args):
+        return (
+            "destructive",
+            "bootsect (Windows) rewrites the boot code; another system on the disk, "
+            "such as Linux, may no longer start",
+        )
+    if name == "bootrec" and {"/fixmbr", "/fixboot", "/rebuildbcd"} & set(args):
+        return (
+            "destructive",
+            "bootrec (Windows) rewrites the boot record or boot configuration; "
+            "another system on the disk may no longer start",
+        )
+    if name == "bcdedit" and "/delete" in args:
+        return (
+            "destructive",
+            "bcdedit /delete (Windows) removes a boot entry; the system it starts may "
+            "no longer boot",
+        )
+    if name == "diskpart":
+        return (
+            "destructive",
+            "diskpart (Windows): its clean, delete partition and format commands erase "
+            "data at once, without asking again",
+        )
+    drives = [a for a in args if re.fullmatch(r"[a-z]:", a)]
+    if name == "format" and drives:
+        return (
+            "destructive",
+            f"format (Windows) erases everything on drive {drives[0].upper()}",
+        )
+    return None
+
+
+WINDOWS_DISK = ("bootsect", "bootrec", "bcdedit", "diskpart", "format")
+
 RULES: dict[str, Rule] = {
     "rm": _rm,
     "dd": _dd,
@@ -551,7 +911,23 @@ RULES: dict[str, Rule] = {
     "mkfs": _format,
     "mkswap": _format,
     "wipefs": _format,
-    **dict.fromkeys(SHELLS, _shell),
+    **dict.fromkeys(SHELLS | {"source", "."}, _shell_source),
+    # warnings only (see above)
+    "parted": _parted,
+    **dict.fromkeys(("fdisk", "gdisk", "cfdisk", "cgdisk"), _fdisk),
+    "sfdisk": _sfdisk,
+    "sgdisk": _sgdisk,
+    "shred": _shred,
+    "blkdiscard": _blkdiscard,
+    **dict.fromkeys(("pvremove", "vgremove", "lvremove"), _lvm_remove),
+    "cryptsetup": _cryptsetup,
+    "efibootmgr": _efibootmgr,
+    **dict.fromkeys(("nc", "ncat", "netcat", "socat"), _reverse_shell),
+    "tee": _tee,
+    **dict.fromkeys(("usermod", "gpasswd", "adduser"), _admin_group),
+    **dict.fromkeys(("curl", "wget"), _upload),
+    "crontab": _crontab,
+    **dict.fromkeys(WINDOWS_DISK, _windows_disk),
 }
 
 # Commands that run the command after them: name -> (options that take a value,
@@ -642,8 +1018,14 @@ def commands(cmd: str) -> list[SimpleCommand]:
 
 
 def _rule_for(name: str) -> Rule | None:
-    """The rule for a command name; mkfs.ext4, mkfs.xfs, ... share the mkfs rule."""
-    return RULES.get(name) or (RULES["mkfs"] if name.startswith("mkfs.") else None)
+    """The rule for a command name; mkfs.ext4, mkfs.xfs, ... share the mkfs rule.
+    Windows commands are matched without case or .exe (BOOTREC.EXE is bootrec)."""
+    windows = name.lower().removesuffix(".exe")
+    return (
+        RULES.get(name)
+        or (RULES["mkfs"] if name.startswith("mkfs.") else None)
+        or (RULES[windows] if windows in WINDOWS_DISK else None)
+    )
 
 
 def find_dangers(cmd: str) -> list[Finding]:
@@ -671,7 +1053,9 @@ def find_dangers(cmd: str) -> list[Finding]:
 
     for c in parsed:
         add(c, _redirect(c))  # redirects belong to the command as written
+        add(c, _network_or_access_redirect(c))
         for real in unwrap(c):
+            add(real, _downloaded_command(real))
             rule = _rule_for(real.name)
             add(real, rule(real) if rule else None)
     return sorted(findings, key=lambda f: -SEVERITY[f.level])
