@@ -1,0 +1,107 @@
+#!/bin/bash
+# First-boot script of the ticket-agent instance (EC2 user_data, see compute.tf).
+#
+# cloud-init runs it once, as root, on the first boot of a new instance. Output goes
+# to /var/log/cloud-init-output.log; `cloud-init status --wait` (used by infra-up)
+# reports done or error. When it finishes, the stack is running and healthy.
+#
+# This is a Terraform template: ${data_bucket}, ${github_repo} and ${region} are filled
+# in by templatefile() before the instance exists. Shell variables are therefore
+# written $name (never with braces, which Terraform would claim); write $${name} if
+# braces are ever needed.
+#
+# Secrets are not handled here: deploy.sh reads them from SSM. That is why -x (print
+# every command) is safe in this script, and it makes the boot log far easier to read.
+set -euxo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+export AWS_REGION="${region}"
+APP_DIR=/opt/ticket-agent
+# first boot: automatic updates often hold the apt lock for a few minutes
+APT=(apt-get -o DPkg::Lock::Timeout=300 -y)
+
+fail() {
+    echo "BOOT FAILED: $*" >&2
+    exit 1
+}
+
+# --- swap: 2 GB --------------------------------------------------------------------
+# The stack idles at ~0.7 of the t3.small's 2 GB; image pulls and startup can spike.
+# With swap a spike is slow; without it the kernel kills a container.
+if [[ ! -f /swapfile ]]; then
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >>/etc/fstab
+fi
+
+# --- Docker settings, written before Docker is installed so it starts with them -----
+# userland-proxy false: containers see real client addresses (verify_origin trusts
+# private addresses for /metrics). Log limits: Docker's default keeps logs forever and
+# would slowly fill the 20 GB disk.
+mkdir -p /etc/docker
+cat >/etc/docker/daemon.json <<'EOF'
+{
+  "userland-proxy": false,
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+EOF
+
+# --- packages ----------------------------------------------------------------------
+"$${APT[@]}" update
+"$${APT[@]}" install ca-certificates curl git unzip
+
+# Docker from Docker's own repository: Ubuntu's compose package may predate 2.24.4,
+# the first version that understands !override (docker-compose.prod.yml).
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+# shellcheck source=/dev/null  # /etc/os-release exists only on the instance
+codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $codename stable" \
+    >/etc/apt/sources.list.d/docker.list
+"$${APT[@]}" update
+"$${APT[@]}" install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable --now docker
+
+# AWS CLI v2 from AWS's installer, into /usr/local/bin: on PATH for cloud-init and for
+# SSM Run Command alike (Ubuntu 24.04 has no apt package; the snap lives in /snap/bin,
+# which SSM's shell may not have on PATH).
+curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+unzip -q -o /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install --update
+rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# --- code --------------------------------------------------------------------------
+# public repository: no credentials. deploy.sh checks out the exact release below.
+git clone "https://github.com/${github_repo}.git" "$APP_DIR"
+cd "$APP_DIR"
+
+# --- data from S3 ------------------------------------------------------------------
+# The retrieval index, uploaded once by hand. Checked here so a missing upload fails
+# with a clear message instead of a vague health-check timeout in deploy.sh.
+aws s3 sync "s3://${data_bucket}/qdrant_storage/" data/qdrant_storage/ --only-show-errors
+[[ -n "$(ls -A data/qdrant_storage)" ]] ||
+    fail "s3://${data_bucket}/qdrant_storage/ is empty: upload the Qdrant index first"
+
+# The hand-off queue backed up by infra-down. Empty on the very first boot, which is
+# fine. The API runs as uid 1000 (appuser in the Dockerfile) and must be able to
+# write here; a root-owned folder would turn every escalation into an HTTP 500.
+mkdir -p data/handoff
+aws s3 sync "s3://${data_bucket}/handoff/" data/handoff/ --only-show-errors
+chown -R 1000:1000 data/handoff
+
+# --- which release ---------------------------------------------------------------
+# Written by CD only after CI passed and the image was pushed, so its image exists.
+# The newest commit on main is not used: its CI may have failed or still be running.
+sha="$(aws ssm get-parameter --name /ticket-agent/RELEASE_SHA \
+    --query Parameter.Value --output text)" ||
+    fail "no /ticket-agent/RELEASE_SHA yet: let CD run once (push to main)"
+
+# --- deploy --------------------------------------------------------------------------
+# secrets, .env, pull, start, health check; a failure fails the boot (cloud-init error)
+"$APP_DIR/deploy/deploy.sh" "$sha"
+
+echo "boot finished: $sha"
