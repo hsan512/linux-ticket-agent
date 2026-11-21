@@ -115,3 +115,25 @@ def test_deploy_role_allows_what_the_release_job_does() -> None:
         "ec2:DescribeInstances",
     ):
         assert action in iam, action
+
+
+def test_roles_trust_this_repository_by_its_immutable_subject() -> None:
+    """GitHub signs this repository's tokens with owner and repository IDs
+    (repo:owner@id/name@id:...); a trust policy on the plain name never matches."""
+    variables = (ROOT / "infra" / "variables.tf").read_text()
+    prefix = re.search(
+        r'variable "github_oidc_subject_prefix".*?default\s*=\s*"([^"]+)"',
+        variables,
+        re.S,
+    ).group(1)
+    owner, name = (
+        re.search(r'variable "github_repo".*?default\s*=\s*"([^"]+)"', variables, re.S)
+        .group(1)
+        .split("/")
+    )
+    assert re.fullmatch(rf"repo:{owner}@\d+/{name}@\d+", prefix)
+    iam = (ROOT / "infra" / "iam.tf").read_text()
+    assert '"${var.github_oidc_subject_prefix}:environment:${each.key}"' in iam
+    assert JOBS["release"]["environment"] in re.search(
+        r"for_each = toset\(\[([^\]]+)\]\)", iam
+    ).group(1)
