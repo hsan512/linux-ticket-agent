@@ -1,5 +1,7 @@
 # Run `agent-v4-test` (agent_v4_validate_confidence_not_high, split=test)
 
+> **Note (2026-11-18):** measured before three later changes that were not re-evaluated: the agent's prompts now forbid follow-up offers ("If you want, I can...") and the grader keeps passages that point to a needed command, which change answers, and the command check gained warnings-only rules, which cannot change routing. See [findings item 32](findings.md#2026-11-18-changes-after-the-final-test-run-not-re-measured).
+
 Generator `gpt-5.4-mini`; workers 4; tickets answered 160/160 (errors: 0); judged 160.
 
 | Metric | Value |

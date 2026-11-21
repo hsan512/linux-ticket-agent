@@ -41,6 +41,12 @@ jobs:
               run: ruff check .
             - name: Check formatting
               run: ruff format --check .
+            - name: Lint GitHub workflows
+              # catches typos in expressions, job references and run: scripts
+              # (actionlint runs shellcheck on them) before a workflow fails for real
+              run: >-
+                  docker run --rm -v "$PWD":/repo -w /repo
+                  rhysd/actionlint:1.7.10 -color
     monitoring:
         runs-on: ubuntu-latest
         env:

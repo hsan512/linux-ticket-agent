@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  The demo page for the ticket agent. No build step, no libraries, three files:
+  index.html (structure), style.css, app.js. Kept separate so the Content-Security-
+  Policy can allow only this site's own files ('self') and no inline code at all.
+
+  Served from the same origin as the API (CloudFront in production, nginx locally), so
+  app.js calls the relative URL /tickets and needs no CORS.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux Ticket Agent</title>
+<meta name="description" content="An AI agent that answers Linux questions with cited sources, or hands them to a human.">
+<!-- Only this site's own files may load or run, and requests may go only to this
+     site. CloudFront also sends it as a header, adding frame-ancestors (no framing),
+     which a meta tag cannot set. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Linux Ticket Agent</h1>
+    <p class="lead">An AI agent that answers Linux questions with cited sources, or hands
+      them to a human when it is not sure.</p>
+  </header>
+
+  <form id="ticket-form" class="panel" novalidate>
+    <div class="field">
+      <label for="title">Title</label>
+      <input id="title" name="title" maxlength="200" required
+             placeholder="e.g. How do I find which process is using a port?">
+    </div>
+    <div class="field">
+      <label for="question">Question</label>
+      <textarea id="question" name="question_text" maxlength="30000" required
+                placeholder="What you tried, what happened, and what you expected."
+                aria-describedby="question-hint"></textarea>
+      <div id="question-hint" class="hint">0 / 4,000 characters</div>
+    </div>
+    <div class="actions">
+      <button id="submit" type="submit">Ask the agent</button>
+      <button id="example" type="button" class="secondary">Try an example</button>
+    </div>
+  </form>
+
+  <section id="result" class="panel" aria-live="polite"></section>
+
+  <footer>
+    <p><strong>Do not include passwords, keys, or personal data.</strong> Your question
+      is sent to OpenAI to generate the answer, and questions handed to a human are
+      stored for review.</p>
+    <p>Answers are AI-generated. Proposed commands are checked automatically but never
+      run; read them before running them on your system.</p>
+    <p>Sources: Linux man pages and GNU manuals, and questions and answers from
+      <a href="https://unix.stackexchange.com" rel="noopener noreferrer">Unix &amp; Linux Stack Exchange</a>
+      (CC BY-SA; authors and licence are shown with each cited answer).</p>
+    <p><a href="/docs">API documentation</a> ·
+      <a href="https://github.com/hsan512/linux-ticket-agent" rel="noopener noreferrer">Source code</a></p>
+  </footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

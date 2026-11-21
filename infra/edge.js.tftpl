@@ -1,0 +1,39 @@
+function handler(event) {
+    var uri = event.request.uri;
+    if (!${online}) {
+        return  {
+            statusCode: 503,
+            statusDescription: "Service Unavailable",
+            headers: {
+                "content-type":  { value: "text/plain" },
+                "cache-control": { value: "no-store" }
+            },
+            body: { encoding: "text", data: "The ticket-agent demo is offline. It runs on demand to save costs; please try again later.\n" }
+        };
+    }
+    if (uri == "/metrics" || uri.startsWith("/metrics/")) {
+        return  {
+            statusCode: 404,
+            statusDescription: "Not Found",
+            headers: {
+                "content-type":  { value: "text/plain" },
+                "cache-control": { value: "no-store" }
+            },
+            body: { encoding: "text", data: "Not found. The API is described at /docs.\n" }
+        };
+    }
+    if (uri == "/docs" || uri.startsWith("/docs/") || uri == "/tickets" || 
+    uri.startsWith("/tickets/") || uri == "/health" || uri.startsWith("/health/") ||
+    uri == "/openapi.json") {
+        return event.request;
+    }
+    return  {
+        statusCode: 404,
+        statusDescription: "Not Found",
+        headers: {
+            "content-type":  { value: "text/plain" },
+            "cache-control": { value: "no-store" }
+        },
+        body: { encoding: "text", data: "Not found. The API is described at /docs.\n" }
+    };
+}

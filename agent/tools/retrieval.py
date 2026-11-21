@@ -87,11 +87,18 @@ class Retriever:
     retrieve renumbers them across calls."""
 
     def __init__(
-        self, docs_k: int = 5, history_k: int = 3, url: str = QDRANT_URL
+        self,
+        docs_k: int = 5,
+        history_k: int = 3,
+        url: str = QDRANT_URL,
+        docs_collection: str = DOCS_COLLECTION,
+        history_collection: str = HISTORY_COLLECTION,
     ) -> None:
+        """The collections are parameters so retrieval experiments
+        (eval/retrieval_eval.py) can point the same code at a re-indexed copy."""
         client = QdrantClient(url=url)
-        self._docs = _retriever(client, DOCS_COLLECTION, docs_k)
-        self._history = _retriever(client, HISTORY_COLLECTION, history_k)
+        self._docs = _retriever(client, docs_collection, docs_k)
+        self._history = _retriever(client, history_collection, history_k)
 
     def search_docs(self, query: str) -> list[Evidence]:
         return [
