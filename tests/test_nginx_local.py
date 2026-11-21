@@ -140,3 +140,66 @@ def test_nginx_config_is_not_published_with_the_page() -> None:
         "index.html",
         "style.css",
     ]
+
+
+# --- production (CloudFront, infra/cdn.tf + infra/site.tf) matches the same rules ---
+
+CDN = (ROOT / "infra" / "cdn.tf").read_text()
+SITE = (ROOT / "infra" / "site.tf").read_text()
+
+
+def test_cloudfront_csp_matches_nginx_and_the_meta_tag() -> None:
+    nginx = re.search(r'add_header Content-Security-Policy "([^"]+)"', CONF).group(1)
+    cloudfront = re.search(r'content_security_policy\s*=\s*"([^"]+)"', SITE).group(1)
+    assert cloudfront == nginx
+
+
+def cdn_api_paths() -> list[str]:
+    block = re.search(r"api_paths\s*=\s*\[([^\]]*)\]", CDN).group(1)
+    return re.findall(r'"([^"]+)"', block)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_cloudfront_api_paths_match_the_edge_function() -> None:
+    """A path routed to the API must pass the edge function, and every path the edge
+    function lets through must be routed to the API (else it falls to S3)."""
+
+    def to_uri(pattern: str) -> str:
+        return pattern.replace("*", "x")  # a concrete path under the pattern
+
+    uris = [to_uri(p) for p in cdn_api_paths()]
+    script = EDGE.replace("${online}", "true") + (
+        f"\nconst out = {{}};\nfor (const uri of {json.dumps(uris)}) {{"
+        "\n  const r = handler({request: {uri, method: 'GET', headers: {}}});"
+        "\n  out[uri] = r.statusCode ? 'blocked' : 'api';\n}"
+        "\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    result = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, check=True
+    )
+    assert set(json.loads(result.stdout).values()) == {"api"}
+    for path in PATHS:  # nginx's API paths are covered by a CloudFront pattern
+        if nginx_route(path) == "api":
+            assert any(
+                path == p or (p.endswith("/*") and path.startswith(p[:-1]))
+                for p in cdn_api_paths()
+            ), path
+
+
+def test_page_headers_only_on_the_default_behaviour() -> None:
+    default = re.search(r"default_cache_behavior \{(.*?)\n  \}", CDN, re.S).group(1)
+    ordered = re.search(
+        r'dynamic "ordered_cache_behavior" \{(.*?)\n  \}', CDN, re.S
+    ).group(1)
+    assert (
+        "response_headers_policy_id" in default
+        and 'target_origin_id           = "site"' in default
+    )
+    assert "response_headers_policy_id" not in ordered  # Swagger at /docs needs its CDN
+    assert "function_association" in ordered and "function_association" not in default
+
+
+def test_site_bucket_is_private_and_read_only_by_this_distribution() -> None:
+    assert SITE.count("= true") >= 4 and "restrict_public_buckets = true" in SITE
+    assert '"AWS:SourceArn"' in SITE and "aws_cloudfront_distribution.api.arn" in SITE
+    assert '"s3:GetObject"' in SITE and "s3:PutObject" not in SITE

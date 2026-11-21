@@ -30,3 +30,8 @@ output "infra_role_arn" {
   description = "Role for the infra-up and infra-down workflows (GitHub environment infra)"
   value       = aws_iam_role.gh_infra.arn
 }
+
+output "site_bucket" {
+  description = "S3 bucket holding the demo page; upload frontend/ here (aws s3 sync), then invalidate the distribution"
+  value       = aws_s3_bucket.site.bucket
+}

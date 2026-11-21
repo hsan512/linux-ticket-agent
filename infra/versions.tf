@@ -32,7 +32,8 @@ terraform {
 }
 
 provider "aws" {
-  region = var.region
+  region              = var.region
+  allowed_account_ids = ["103888845841"]
 
   # on every resource: cost tracking per app, and the deploy role only acts on
   # instances tagged App=ticket-agent. No profile here: AWS_PROFILE locally,

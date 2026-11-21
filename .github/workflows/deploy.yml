@@ -1,0 +1,131 @@
+name: Deploy
+# CD: every commit that passes CI on main becomes a release.
+#   publish: build the image from exactly that commit and push it to GHCR
+#   release: record it in SSM (RELEASE_SHA), upload the page to S3, and run
+#            deploy.sh on the instance if the demo is up (through SSM, no SSH)
+# Never runs for pull requests or forks: only CI runs from pushes to main, and the
+# AWS role (infra/iam.tf, gh-deploy) accepts only the "production" environment.
+on:
+    workflow_run:
+        workflows: [CI]  # the `name:` in ci.yml, not its filename
+        types: [completed]
+        branches: [main]
+concurrency:  # two quick merges deploy one after the other, never at once
+    group: deploy-production
+    cancel-in-progress: false
+permissions:
+    contents: read
+env:
+    # The commit CI tested. Not github.sha: in a workflow_run that is the newest commit
+    # on main, which may be one CI has not checked yet.
+    SHA: ${{ github.event.workflow_run.head_sha }}
+    IMAGE: ghcr.io/hsan512/linux-ticket-agent  # registry names must be lowercase
+jobs:
+    prepare:
+        if: >-
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push'
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo "Releasing commit $SHA"
+    publish:
+        needs: prepare
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write  # push to GHCR with the built-in GITHUB_TOKEN
+        steps:
+            - name: Check out the tested commit
+              uses: actions/checkout@v7
+              with:
+                  ref: ${{ env.SHA }}
+            - name: Set up Docker Buildx  # needed for the GitHub Actions layer cache
+              uses: docker/setup-buildx-action@v4
+            - name: Log in to GitHub Container Registry
+              uses: docker/login-action@v4
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            - name: Build and push the image
+              uses: docker/build-push-action@v7
+              with:
+                  # the checked-out folder (at SHA), not GitHub's copy of the event's
+                  # commit, which in a workflow_run is the newest commit on main
+                  context: .
+                  push: true
+                  tags: ${{ env.IMAGE }}:${{ env.SHA }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+    release:
+        needs: [prepare, publish]
+        runs-on: ubuntu-latest
+        environment: production  # the only environment the gh-deploy role trusts
+        permissions:
+            contents: read
+            id-token: write  # OIDC: short-lived AWS credentials, no stored keys
+        steps:
+            - name: Check out the tested commit  # for frontend/
+              uses: actions/checkout@v7
+              with:
+                  ref: ${{ env.SHA }}
+            - name: Log in to AWS (OIDC)
+              uses: aws-actions/configure-aws-credentials@v6
+              with:
+                  role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+                  aws-region: us-east-1
+            - name: Record the release
+              # written only after the image exists, so the boot script (which reads
+              # it on a fresh instance) never picks an image that is missing
+              run: >-
+                  aws ssm put-parameter --name /ticket-agent/RELEASE_SHA
+                  --type String --value "$SHA" --overwrite
+            - name: Upload the page
+              run: |
+                  aws s3 sync frontend/ "s3://${{ vars.SITE_BUCKET }}/" --delete
+                  aws cloudfront create-invalidation \
+                      --distribution-id "${{ vars.DISTRIBUTION_ID }}" --paths "/*"
+            - name: Find the running instance
+              id: instance
+              run: |
+                  id="$(aws ec2 describe-instances \
+                      --filters Name=tag:App,Values=ticket-agent Name=instance-state-name,Values=running \
+                      --query 'Reservations[].Instances[].InstanceId' --output text)"
+                  echo "id=$id" >> "$GITHUB_OUTPUT"
+                  if [ -z "$id" ]; then
+                      echo "::notice::Demo offline: release $SHA recorded; the next infra-up deploys it."
+                  fi
+            - name: Deploy on the instance
+              if: steps.instance.outputs.id != ''
+              env:
+                  INSTANCE_ID: ${{ steps.instance.outputs.id }}
+              run: |
+                  # SSM runs deploy.sh on the server as root; $SHA becomes its $1
+                  command_id="$(aws ssm send-command \
+                      --instance-ids "$INSTANCE_ID" \
+                      --document-name AWS-RunShellScript \
+                      --comment "deploy $SHA" \
+                      --timeout-seconds 600 \
+                      --parameters "commands=[\"/opt/ticket-agent/deploy/deploy.sh $SHA\"]" \
+                      --query Command.CommandId --output text)"
+                  # poll instead of `aws ssm wait`, which gives up after about 100 s;
+                  # an image pull and the health check can take longer
+                  status=Pending
+                  for _ in $(seq 1 120); do
+                      status="$(aws ssm get-command-invocation \
+                          --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                          --query Status --output text 2>/dev/null || echo Pending)"
+                      case "$status" in
+                          Pending|InProgress|Delayed) sleep 5 ;;
+                          *) break ;;
+                      esac
+                  done
+                  for stream in StandardOutputContent StandardErrorContent; do
+                      aws ssm get-command-invocation \
+                          --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                          --query "$stream" --output text
+                  done
+                  if [ "$status" != Success ]; then
+                      echo "::error::deploy.sh on $INSTANCE_ID ended with status $status"
+                      exit 1
+                  fi

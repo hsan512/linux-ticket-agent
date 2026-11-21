@@ -1,6 +1,7 @@
 # Who may do what. Three identities:
 #   - the EC2 instance: read its secrets and data, back up the hand-off queue
-#   - GitHub CD (gh-deploy): only tell the instance to run deploy.sh
+#   - GitHub CD (gh-deploy): run deploy.sh on the instance, record the release, upload
+#     the page
 #   - GitHub infra-up/down (gh-infra): run Terraform
 # GitHub workflows log in with short-lived OIDC tokens, so no AWS keys are stored in
 # GitHub. Policies are built with aws_iam_policy_document (checked by Terraform)
@@ -113,7 +114,7 @@ data "aws_iam_policy_document" "github_assume" {
 
 resource "aws_iam_role" "gh_deploy" {
   name                 = "ticket-agent-gh-deploy"
-  description          = "GitHub CD (environment production): run deploy.sh on the instance"
+  description          = "GitHub CD (environment production): deploy.sh, RELEASE_SHA, page upload"
   assume_role_policy   = data.aws_iam_policy_document.github_assume["production"].json
   max_session_duration = 3600
 }
@@ -135,6 +136,30 @@ data "aws_iam_policy_document" "gh_deploy" {
       variable = "aws:ResourceTag/App"
       values   = ["ticket-agent"]
     }
+  }
+
+  # CD records the release that passed CI; the boot script deploys it
+  statement {
+    sid       = "RecordRelease"
+    actions   = ["ssm:PutParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${local.account_id}:parameter/ticket-agent/RELEASE_SHA"]
+  }
+
+  # CD uploads the page and makes CloudFront serve the new files at once
+  statement {
+    sid       = "UploadPage"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.site.arn}/*"]
+  }
+  statement {
+    sid       = "ListPage"
+    actions   = ["s3:ListBucket"] # aws s3 sync --delete compares with what is there
+    resources = [aws_s3_bucket.site.arn]
+  }
+  statement {
+    sid       = "InvalidatePage"
+    actions   = ["cloudfront:CreateInvalidation"]
+    resources = [aws_cloudfront_distribution.api.arn]
   }
 
   # find the instance and read the command's result; these accept no narrower resource
