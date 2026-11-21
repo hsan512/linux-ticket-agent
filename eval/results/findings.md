@@ -241,3 +241,45 @@ Offline measurements on existing runs (no API calls):
     - Replaying agent-v4-dev-2's searches: 47% recall before grading, 30% after; most drops were
       right (terms in passing), about 6 were pointers to the needed tool (item 32, grader change).
     Spent: about $0.05 (one planning call per dev ticket; embeddings under $0.01).
+
+## 2026-11-18: do askers add information after posting? (feasibility of a conversational eval)
+
+34. **Yes, often: 38% of 2023+ questions with an accepted answer had the asker add something
+    before that answer was posted.** Counted locally from the dump's PostHistory and Comments
+    (8,190 questions outside the benchmark): 26% have an asker edit adding at least 80
+    characters (20% with code or command output), 25% have an asker comment replying to someone.
+    In a hand-read random sample of 10, about 7 added real facts (command output, logs, system
+    details, what was tried, e.g. an "UPDATE" with the journal lines a commenter asked for);
+    the rest were thanks or questions back. So roughly a quarter to a third of tickets would
+    have facts for a grounded simulated asker to reveal.
+    **Consequence for every result above:** `Posts.xml` stores the latest text, so the benchmark
+    questions already include these additions: 36% of the 198 benchmark questions found in
+    PostHistory were extended by the asker before the accepted answer. All agents and baselines
+    were evaluated on the *final* question, i.e. with facts a real first message would not
+    contain. This affects all systems alike, so comparisons stand, but absolute accuracy for a
+    first-contact ticket is likely overstated.
+
+35. **Value of asking (step 2) and what the model would ask (step 3): a small, uncertain gain;
+    the model rarely knows it needs more.** `eval/voi_eval.py`, 50 questions outside the
+    benchmark whose asker added code or output before the accepted answer (1,668 qualified,
+    seed 0). The agent (agent-v4 config, current prompts) answered the first message and the
+    version with the additions; the judge always saw the full final question.
+    - Correct: 40% on the first message, 46% with the additions (mean score 3.20 vs 3.48); 7
+      questions became correct, 4 became wrong (exact McNemar p = 0.55): not significant at n=50.
+      With the additions it answered less often (56% vs 68% not escalated); why is not
+      determined: lower confidence and harder problems revealed by the additions both fit (the
+      9 tickets escalated only with the additions had correct drafts 4 of 9 times either way).
+    - Read as a conversation that closes when the asker accepts: 20/50 correct at turn 1, 7 more
+      at turn 2 = 27/50 (54%), at +$0.011 per ticket on average. An upper bound: it assumes turn 2
+      brings exactly what the real asker added, often because a human asked for it.
+    - Asked what it would want first, the model said it was ready to answer for 32 of 50 first
+      messages, although every one of these askers later added facts (often because a human
+      asked). Where it did ask (18 tickets, 67 requests), 48% of requests were answered by what
+      the asker later added, and for 12 of 50 tickets the requests would have drawn out the main
+      point. None of the 51 requested commands was flagged by the danger check (that check is not a
+      read-only allow-list).
+    - The gain sits where the model would ask: net +4 of 18 tickets there, -1 of 32 where it said
+      it was ready (tiny n). Consistent with item 6 (`missing_info` was always empty): the weak
+      link is recognising missing information, not asking for the right thing.
+    Decision input: a full conversational loop is not justified by accuracy alone on this
+    evidence; knowing when to ask is the part to improve and measure first. Spent $2.17.
