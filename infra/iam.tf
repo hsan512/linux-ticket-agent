@@ -87,7 +87,8 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 # Trust for a role that only workflows of this repository, running in the given
-# GitHub environment, may assume. The token's "sub" claim names both.
+# GitHub environment, may assume. The token's "sub" claim names both, with numeric
+# IDs (immutable subjects), e.g. repo:owner@123/name@456:environment:production.
 data "aws_iam_policy_document" "github_assume" {
   for_each = toset(["production", "infra"])
 
@@ -105,7 +106,7 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc}:sub"
-      values   = ["repo:${var.github_repo}:environment:${each.key}"]
+      values   = ["${var.github_oidc_subject_prefix}:environment:${each.key}"]
     }
   }
 }

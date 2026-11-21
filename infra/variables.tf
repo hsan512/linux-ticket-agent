@@ -20,7 +20,13 @@ variable "instance_type" {
 }
 
 variable "github_repo" {
-  description = "GitHub repository as owner/name. Only workflows from this repository may assume the deploy and infra roles (OIDC trust)."
+  description = "GitHub repository as owner/name: the boot script clones it."
   type        = string
   default     = "hsan512/linux-ticket-agent"
+}
+
+variable "github_oidc_subject_prefix" {
+  description = "Start of the sub claim in this repository's GitHub OIDC tokens. The repository uses immutable subjects, which add the owner's and the repository's numeric IDs, so a renamed or re-created repository with the same name cannot match. Read it with: gh api repos/OWNER/REPO/actions/oidc/customization/sub (sub_claim_prefix)."
+  type        = string
+  default     = "repo:hsan512@167156700/linux-ticket-agent@1451351959"
 }
