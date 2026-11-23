@@ -186,6 +186,39 @@ def test_cloudfront_api_paths_match_the_edge_function() -> None:
             ), path
 
 
+def cdn_blocked_paths() -> list[str]:
+    block = re.search(r"blocked_paths\s*=\s*\[([^\]]*)\]", CDN).group(1)
+    return re.findall(r'"([^"]+)"', block)
+
+
+def covered(path: str, patterns: list[str]) -> bool:
+    return any(
+        path == p or (p.endswith("/*") and path.startswith(p[:-1])) for p in patterns
+    )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_cloudfront_blocks_metrics_with_the_edge_404() -> None:
+    """Every path nginx blocks must have a CloudFront behaviour that runs the edge
+    function; otherwise it falls to S3 and gets a 403 XML (seen in the live test)."""
+    blocked = cdn_blocked_paths()
+    assert "for_each = concat(local.api_paths, local.blocked_paths)" in CDN
+    for path in PATHS:
+        if nginx_route(path) == "blocked":
+            assert covered(path, blocked), path
+    uris = [p.replace("*", "x") for p in blocked]
+    script = EDGE.replace("${online}", "true") + (
+        f"\nconst out = {{}};\nfor (const uri of {json.dumps(uris)}) {{"
+        "\n  const r = handler({request: {uri, method: 'GET', headers: {}}});"
+        "\n  out[uri] = r.statusCode;"
+        "\n}\nprocess.stdout.write(JSON.stringify(out));"
+    )
+    result = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, check=True
+    )
+    assert set(json.loads(result.stdout).values()) == {404}
+
+
 def test_page_headers_only_on_the_default_behaviour() -> None:
     default = re.search(r"default_cache_behavior \{(.*?)\n  \}", CDN, re.S).group(1)
     ordered = re.search(

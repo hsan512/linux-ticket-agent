@@ -2,8 +2,10 @@
 #   - the API paths go to the instance on port 8000 with the X-Origin-Verify secret,
 #     uncached (every ticket is unique), through the edge function, which answers 503
 #     while the instance is off;
+#   - /metrics goes through the edge function too, which answers 404 itself (the same
+#     text as deploy/nginx.local.conf), so it never reaches the API;
 #   - everything else is the demo page from the private S3 bucket (site.tf), cached,
-#     with security headers. /metrics is not an API path, so it never reaches the API.
+#     with security headers. Unknown paths get S3's 403 AccessDenied.
 # The URL stays the same across infra-down and infra-up.
 
 locals {
@@ -14,6 +16,11 @@ locals {
   # API paths, routed to the instance. Must match the edge function's allow-list
   # (edge.js.tftpl) and deploy/nginx.local.conf; tests/test_nginx_local.py checks it.
   api_paths = ["/tickets", "/tickets/*", "/health", "/docs", "/docs/*", "/openapi.json"]
+
+  # Paths the edge function blocks with its own 404. Without a behaviour of their own
+  # they would fall to the S3 page origin and get its 403 XML instead (found in the
+  # first live test).
+  blocked_paths = ["/metrics", "/metrics/*"]
 }
 
 # Runs at the edge on every request, before the origin (edge.js.tftpl).
@@ -118,9 +125,10 @@ resource "aws_cloudfront_distribution" "api" {
     compress                   = true
   }
 
-  # the API, one behaviour per path pattern, all with the same settings
+  # the API, one behaviour per path pattern, all with the same settings. The blocked
+  # paths share them: the edge function answers before the origin is contacted.
   dynamic "ordered_cache_behavior" {
-    for_each = local.api_paths
+    for_each = concat(local.api_paths, local.blocked_paths)
     content {
       path_pattern     = ordered_cache_behavior.value
       target_origin_id = "api"
