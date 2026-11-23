@@ -57,7 +57,10 @@ def test_login_matches_the_gh_infra_trust_policy() -> None:
         login = steps(job)[index_of(job, "configure-aws-credentials")]["with"]
         assert login["role-to-assume"] == "${{ vars.INFRA_ROLE_ARN }}"
         assert login["aws-region"] == region
-    assert 'assume_role_policy   = data.aws_iam_policy_document.github_assume["infra"]' in IAM
+    assert (
+        'assume_role_policy   = data.aws_iam_policy_document.github_assume["infra"]'
+        in IAM
+    )
 
 
 def test_never_overlaps_and_runs_in_infra() -> None:
@@ -79,7 +82,9 @@ def test_terraform_version_and_flags() -> None:
     applies = [r for r in runs if r.startswith("terraform apply")]
     assert len(applies) == 2
     assert all("-auto-approve" in a and "-input=false" in a for a in applies)
-    assert "instance_enabled=true" in applies[0] and "instance_enabled=false" in applies[1]
+    assert (
+        "instance_enabled=true" in applies[0] and "instance_enabled=false" in applies[1]
+    )
 
 
 def test_up_waits_for_health_not_the_page() -> None:
@@ -87,7 +92,9 @@ def test_up_waits_for_health_not_the_page() -> None:
     wait = steps("up")[index_of("up", "Wait until healthy")]["run"]
     assert 'curl -fsS "$URL/health"' in wait
     assert "exit 1" in wait
-    assert index_of("up", "Wait until healthy") > index_of("up", "instance_enabled=true")
+    assert index_of("up", "Wait until healthy") > index_of(
+        "up", "instance_enabled=true"
+    )
     log = steps("up")[index_of("up", "Print the boot log")]
     assert log["if"] == "failure()"
     assert "cloud-init-output.log" in log["run"]
