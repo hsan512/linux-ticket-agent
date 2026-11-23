@@ -47,7 +47,20 @@ jobs:
                   registry: ghcr.io
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
+            - name: Check whether this commit's image exists
+              # A re-run would otherwise rebuild and push a different image under the
+              # same tag (builds are not byte-for-byte reproducible): a released tag
+              # must always mean the same image. Re-runs only redeploy.
+              id: existing
+              run: |
+                  if docker buildx imagetools inspect "$IMAGE:$SHA" >/dev/null 2>&1; then
+                      echo "found=true" >> "$GITHUB_OUTPUT"
+                      echo "$IMAGE:$SHA already exists; not rebuilding it."
+                  else
+                      echo "found=false" >> "$GITHUB_OUTPUT"
+                  fi
             - name: Build and push the image
+              if: steps.existing.outputs.found != 'true'
               uses: docker/build-push-action@v7
               with:
                   # the checked-out folder (at SHA), not GitHub's copy of the event's

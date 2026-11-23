@@ -49,6 +49,17 @@ def test_releases_the_commit_ci_tested() -> None:
     assert build["tags"] == "${{ env.IMAGE }}:${{ env.SHA }}"
 
 
+def test_a_released_tag_is_never_rebuilt() -> None:
+    """A re-run must not push a different image under the same SHA tag."""
+    names = [s.get("name", "") for s in steps("publish")]
+    check = names.index("Check whether this commit's image exists")
+    build = names.index("Build and push the image")
+    assert check < build
+    assert 'imagetools inspect "$IMAGE:$SHA"' in steps("publish")[check]["run"]
+    assert steps("publish")[check]["id"] == "existing"
+    assert steps("publish")[build]["if"] == "steps.existing.outputs.found != 'true'"
+
+
 def test_least_privilege_per_job() -> None:
     assert WORKFLOW["permissions"] == {"contents": "read"}
     assert JOBS["publish"]["permissions"] == {"contents": "read", "packages": "write"}
